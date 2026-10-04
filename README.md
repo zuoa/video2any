@@ -142,13 +142,13 @@ docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/video2any:l
 - yt-dlp
 - DejaVu 与 Noto 中文字体
 - Pandoc（Word 原生公式导出）
-- faster-whisper（CPU 语音识别）
+- SenseVoice-Small / Qwen3-ASR-0.6B（本地中文语音识别），保留 faster-whisper 兼容模式
 
 Bilibili 下载取决于部署环境网络可达性和 cookie 有效性。部分视频如果需要会员、地区权限或 cookie 过期，yt-dlp 可能无法下载，后端会把失败原因返回给前端。
 
 ## 讲课视频转练习题
 
-`/#/exercises` 支持上传讲课视频，或输入 B 站 BV / URL 并选择单个分 P。下载或上传完成后，在服务端 CPU 上通过 **faster-whisper** 识别语音，再使用现有 `OPENAI_*` 配置提炼知识点。
+`/#/exercises` 支持上传讲课视频，或输入 B 站 BV / URL 并选择单个分 P。下载或上传完成后，在服务端通过 `.env` 的 `ASR_BACKEND` 选择 **SenseVoice-Small** 或 **Qwen3-ASR-0.6B** 识别中文语音，再使用现有 `OPENAI_*` 配置提炼知识点。默认 SenseVoice-Small，保留 Whisper 兼容模式。页面只显示服务端配置的模型。修改 `.env` 后重新创建容器并刷新页面，新识别任务使用新模型。
 
 1. 查看带时间戳的转写，校对术语、补充没有念出的板书公式；保存后重新提炼知识点。
 2. 编辑知识点并保存，勾选出题范围。
@@ -159,21 +159,58 @@ Bilibili 下载取决于部署环境网络可达性和 cookie 有效性。部分
 
 长视频按完整转写分段提炼，不截掉后半段。只分析语音文字，不自动识别 PPT 或板书画面；可手动补充。题数少于所选知识点时，从选定范围均匀取点。模型生成后会复核答案和解析，仍建议在打印前查看候选题。
 
-转写和出题为后台任务，页面显示阶段及进度，刷新后恢复最近课程；页面地址中的 `lesson` 参数也可以重新打开该课程。错误可重试，已完成的转写会复用。课程文字、知识点与题目批次保存在 `/data/exercises/exercises.db`，与 24 小时原视频缓存独立；处理中的原视频不会被清理。服务重启会把未完成任务标记为中断，可手动重试。
+转写和出题为后台任务，页面显示阶段及进度，刷新后恢复最近课程；页面地址中的 `lesson` 参数也可以重新打开该课程。错误可重试，同一模型已完成的转写会复用。切换模型后，点击“使用新模型重新识别”，会重新转写并提炼知识点，更新内容版本，保留旧题目批次；会替换当前转写及手动修改，需原视频仍在缓存中。任务使用提交时的模型，运行中不可切换。切换识别失败时保留旧内容；识别成功但知识点提炼失败时，重试复用新模型的转写。课程文字、知识点与题目批次保存在 `/data/exercises/exercises.db`，与 24 小时原视频缓存独立；处理中的原视频不会被清理。服务重启会把未完成任务标记为中断，可手动重试。
 
-新增环境变量：
+环境变量（Compose 已传入）：
 
-- `WHISPER_MODEL`：默认 `small`（多语言）；也可传本地 CTranslate2 模型目录。
-- `HF_ENDPOINT`：模型下载地址，默认 `https://hf-mirror.com`（第三方国内镜像）；可设为 `https://huggingface.co` 使用官方源，或指定其他兼容镜像。
-- `WHISPER_CPU_THREADS`：CPU 推理线程数，默认 `4`，转写任务串行执行。
-- `WHISPER_MODEL_DIR`：模型缓存路径，默认 `DATA_DIR/models`。
+- `ASR_BACKEND`：`sensevoice`（默认）、`qwen3` 或 `whisper`，所有新识别任务采用此配置；页面不能覆盖服务端选择。
+- `ASR_MODEL_SOURCE`：新模型下载源，默认 `modelscope`，也支持 `huggingface`。
+- `SENSEVOICE_MODEL`：默认 `iic/SenseVoiceSmall`，可传本地模型目录。
+- `QWEN_ASR_MODEL`：默认 `Qwen/Qwen3-ASR-0.6B-hf`，可传本地模型目录。使用官方 Transformers 原生 `-hf` 权重（同为 0.6B），本地目录也需对应此版本。
+- `ASR_VAD_MODEL`：默认 `iic/speech_fsmn_vad_zh-cn-16k-common-pytorch`，两个中文模型共用，可传本地目录。
+- `ASR_MODEL_DIR`：新模型缓存根目录，默认 `DATA_DIR/models`；ModelScope、Hugging Face 缓存分开保存。
+- `ASR_DEVICE`：新模型推理设备，默认 `cpu`；本地支持 PyTorch 的设备如 `cuda:0`、`mps`。默认 Docker 镜像安装 CPU 版 PyTorch，GPU 部署需自行安装匹配运行时。
+- `ASR_CPU_THREADS`：新模型 CPU 线程数，默认 `4`，所有转写串行执行，每次只保留一个识别模型以控制内存。
+- `ASR_SEGMENT_SECONDS`：语音段最长秒数，默认 `25`，范围 `5–30`。SenseVoice / Qwen 时间戳来自 VAD 的原视频语音段位置，适合内容回看，不是逐字强制对齐。
+- `WHISPER_MODEL`：兼容模式模型，默认 `small`；也可传本地 CTranslate2 模型目录。
+- `HF_ENDPOINT`：Hugging Face 下载地址，默认 `https://hf-mirror.com`；可设为 `https://huggingface.co` 使用官方源。不影响 ModelScope 下载。
+- `HF_HUB_DISABLE_XET`：默认 `1`，关闭 Xet/CAS 文件重建，避免镜像下载仍访问 `cas-server.xethub.hf.co` 而报 401。需要在 Python 进程启动前设置；官方网络下可显式设为 `0`。
+- `WHISPER_CPU_THREADS` / `WHISPER_MODEL_DIR`：兼容模式线程数 / 缓存目录，默认 `4` / `DATA_DIR/models`。
 - `EXERCISE_MAX_INPUT_CHARS`：知识点提炼每段原文预算，默认 `9000`。
 
-Docker 镜像包含 Pandoc 和 Noto 中文字体。Compose 持久挂载 `./data/exercises` 与 `./data/models`。首次使用默认通过 `hf-mirror.com` 下载模型，下载后缓存持久保留；离线部署可预先放入转换好的模型并配置 `WHISPER_MODEL`。语音识别不需要 GPU 或外部转写接口；知识点与出题需要有效的 `OPENAI_API_KEY`。
+两个中文模型均使用本地推理，无需外部转写 API。Qwen 在 CPU 上通常比 SenseVoice 慢，也需要更多内存；首次使用下载对应识别模型和小型 VAD 模型，后续复用持久缓存。长视频先用 FFmpeg 提取 16 kHz 单声道音轨，再按 VAD 片段识别，保留原视频时间位置。知识点与出题需要有效的 `OPENAI_API_KEY`。
 
-如果首次下载提示 `Network is unreachable`，请检查容器能否访问下载源。在 `.env` 中设置 `HF_ENDPOINT=https://hf-mirror.com`（或其他可达的兼容地址），并确保 `docker-compose.yml` 的 `environment` 包含 `HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}`，然后运行 `docker compose up -d --force-recreate app`，再在页面重试。只修改 `.env` 而未在 Compose 中传入该变量不会生效；`docker compose restart` 也不会应用新的环境变量。本地开发可用 `HF_ENDPOINT=https://hf-mirror.com uvicorn backend.app.main:app --reload` 指定下载源；变量必须在启动进程前设置。
+切换示例（已运行包含新模型依赖的镜像时）：
 
-若镜像仍不可达，或重定向到无法访问的官方源，请配置可用的下载源或网络代理，也可离线准备模型目录并挂载到容器，再将 `WHISPER_MODEL` 设为该目录的容器内路径。
+```dotenv
+ASR_BACKEND=qwen3
+ASR_MODEL_SOURCE=modelscope
+HF_HUB_DISABLE_XET=1
+```
+
+保存 `.env` 后执行 `docker compose up -d --force-recreate app`，然后刷新页面。切回 SenseVoice 将 `ASR_BACKEND` 改为 `sensevoice`。环境变量固定在任务提交时，服务重启前正在进行的任务会被标记为中断，可重试。
+
+Docker 镜像包含新模型依赖、CPU PyTorch、Pandoc 和 Noto 中文字体。Compose 持久挂载 `./data/exercises` 与 `./data/models`。模型切换的代码变更需要使用包含本次更新的新镜像；本地从源码构建可运行：
+
+```bash
+docker build -t video2any:local .
+# 将 docker-compose.yml 的 image 改为 video2any:local 后：
+docker compose up -d --force-recreate app
+```
+
+若旧版本 Whisper 下载出现 `File reconstruction error / CAS Client Error / 401 Unauthorized`，可先在 `.env` 增加 `HF_HUB_DISABLE_XET=1`，并在 Compose 的 `environment` 中增加 `HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}`，然后运行 `docker compose up -d --force-recreate app` 再重试。此变量由 Hugging Face 官方支持：[环境变量说明](https://huggingface.co/docs/huggingface_hub/package_reference/environment_variables#hfhubdisablexet)。只修改 `.env` 而不传入容器不会生效；`docker compose restart` 不会应用新的环境变量。已有正常模型缓存无需删除。
+
+若提示 `Network is unreachable`，检查容器到下载源的网络。新模型默认使用 ModelScope；可改为 `ASR_MODEL_SOURCE=huggingface` 并配置 `HF_ENDPOINT`，或者配置可达的代理。离线部署需预先准备识别模型和 VAD 模型完整目录，放到 `./data/models` 下，并使用容器路径，例如：
+
+```dotenv
+ASR_BACKEND=sensevoice
+SENSEVOICE_MODEL=/data/models/SenseVoiceSmall
+QWEN_ASR_MODEL=/data/models/Qwen3-ASR-0.6B
+ASR_VAD_MODEL=/data/models/fsmn-vad
+HF_HUB_DISABLE_XET=1
+```
+
+本地开发建议 Python 3.12，安装 `backend/requirements.txt`。本地 `.env` 不会自动读取，启动时传入环境变量，例如 `ASR_BACKEND=qwen3 HF_HUB_DISABLE_XET=1 uvicorn backend.app.main:app --reload`。
 
 本地运行 Word 导出还需安装 Pandoc 和 Noto Serif CJK SC 字体（Linux 可安装 `pandoc fonts-noto-cjk`，macOS 可使用 Homebrew 安装 Pandoc 并安装 Noto 中文字体）。请保持单个 Uvicorn worker；本模块的工作池及清理保护由单进程管理。
 

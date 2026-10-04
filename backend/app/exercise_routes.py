@@ -3,6 +3,7 @@ from .exercise_models import PrepareRequest, LessonPatch, GenerateRequest, Expor
 from . import exercise_service as service, exercise_store as store, exercise_export
 from .ffmpeg_tools import VideoProcessingError
 from .models import ExportResponse
+from . import asr_service
 
 router = APIRouter(prefix="/api/exercises", tags=["exercises"])
 
@@ -19,6 +20,11 @@ def call(operation, *args):
 @router.post("/prepare")
 def prepare(request: PrepareRequest):
     return call(service.prepare, request.video_id)
+
+
+@router.get("/asr/options")
+def asr_options():
+    return asr_service.options()
 
 
 @router.get("/jobs/{job_id}")

@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from backend.app.config import settings
 from backend.app import exercise_service as service, exercise_store as store, exercise_export as exporter, storage
+from backend.app import asr_service
 from backend.app.exercise_models import GenerateRequest, LessonPatch, Question, ExportExercisesRequest
 from backend.app.exercise_routes import router
 from backend.app.ffmpeg_tools import VideoProcessingError
@@ -26,7 +27,9 @@ def isolated(tmp_path, monkeypatch):
         directory.mkdir()
         monkeypatch.setattr(settings, name, directory)
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    monkeypatch.setattr(service, "_model", None)
+    monkeypatch.setattr(settings, "asr_backend", "whisper")
+    monkeypatch.setattr(asr_service, "_model", None)
+    monkeypatch.setattr(asr_service, "_model_key", None)
     service.start()
     yield
     service.stop()
@@ -208,7 +211,7 @@ def test_model_download_failure_reports_endpoint_and_can_retry():
     assert settings.hf_endpoint in str(error.value)
     assert "WHISPER_MODEL" in str(error.value)
     assert error.value.__cause__ is failure
-    assert service._model is None
+    assert asr_service._model is None
     model = SimpleNamespace(transcribe=lambda *a, **k: (
         iter([SimpleNamespace(start=0, end=2, text="重试成功")]), SimpleNamespace(duration=3)
     ))
@@ -316,3 +319,103 @@ def test_fill_blank_question_requires_blank_position():
     with pytest.raises(ValidationError, match="填空位置"):
         Question.model_validate(question(type="fill_blank", stem="解释这个定义"))
     assert Question.model_validate(question(type="fill_blank", stem="公式是（________）。"))
+
+
+def test_asr_options_and_client_cannot_override_server_selection(monkeypatch):
+    monkeypatch.setattr(settings, "asr_backend", "sensevoice")
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    options = client.get("/api/exercises/asr/options").json()
+    assert options["default_backend"] == "sensevoice"
+    assert {option["id"] for option in options["backends"]} == {"sensevoice", "qwen3", "whisper"}
+    for backend in ("unknown", "qwen3"):
+        response = client.post("/api/exercises/prepare", json={"video_id": "a" * 32, "asr_backend": backend})
+        assert response.status_code == 422
+
+
+def test_changed_server_model_is_used_for_saved_video(monkeypatch):
+    value = lesson()
+    monkeypatch.setattr(settings, "asr_backend", "qwen3")
+    with patch.object(service, "pin_video", return_value=Path("source.mp4")), patch.object(service, "unpin_video"), patch.object(service, "transcribe", return_value=value["segments"]) as transcribe, patch.object(service, "extract_knowledge", return_value=value["knowledge_points"]):
+        task = service.prepare(value["video_id"])
+        assert wait_job(task)["status"] == "succeeded"
+        assert transcribe.call_args.args[1]["request"]["asr_backend"] == "qwen3"
+        assert service.prepare(value["video_id"]) == task
+        assert transcribe.call_count == 1
+    assert store.lesson(value["id"])["asr_backend"] == "qwen3"
+
+
+def test_switch_model_invalidates_transcript_but_preserves_old_batches():
+    value = lesson()
+    value["batches"] = [{"id": "old", "version": 1, "questions": [question()]}]
+    store.save_lesson(value)
+    new_segments = [{"start": 2, "end": 10, "text": "千问识别结果"}]
+    with patch.object(service, "pin_video", return_value=Path("source.mp4")), patch.object(service, "unpin_video") as unpin, patch.object(service, "transcribe", return_value=new_segments) as transcribe, patch.object(service, "extract_knowledge", return_value=value["knowledge_points"]):
+        task = service.prepare(value["video_id"], "qwen3")
+        assert wait_job(task)["status"] == "succeeded"
+        assert service.prepare(value["video_id"], "qwen3") == task
+        assert transcribe.call_count == 1
+        assert transcribe.call_args.args[1]["request"]["asr_backend"] == "qwen3"
+    unpin.assert_called_once_with(value["video_id"])
+    saved = store.lesson(value["id"])
+    assert saved["segments"] == new_segments
+    assert saved["asr_backend"] == "qwen3"
+    assert saved["version"] == 2
+    assert saved["batches"][0]["version"] == 1
+
+
+def test_failed_model_switch_preserves_old_content_and_can_return_old_cache():
+    value = lesson()
+    with patch.object(service, "pin_video", return_value=Path("source.mp4")), patch.object(service, "unpin_video"), patch.object(service, "transcribe", side_effect=VideoProcessingError("model load failed")):
+        assert wait_job(service.prepare(value["video_id"], "sensevoice"))["status"] == "failed"
+    saved = store.lesson(value["id"])
+    assert saved["segments"] == value["segments"]
+    assert saved["knowledge_points"] == value["knowledge_points"]
+    assert saved["version"] == 1
+    assert service.prepare(value["video_id"], "whisper") == {"lesson_id": value["id"], "job_id": None}
+
+
+def test_model_switch_with_expired_source_keeps_old_content():
+    value = lesson()
+    with pytest.raises(VideoProcessingError):
+        service.prepare(value["video_id"], "qwen3")
+    assert store.lesson(value["id"]) == value
+
+
+def test_retry_after_switch_reuses_new_transcript_if_extraction_failed():
+    value = lesson()
+    new_segments = [{"start": 2, "end": 10, "text": "SenseVoice识别结果"}]
+    with patch.object(service, "pin_video", return_value=Path("source.mp4")), patch.object(service, "unpin_video"), patch.object(service, "transcribe", return_value=new_segments) as transcribe, patch.object(service, "extract_knowledge", side_effect=VideoProcessingError("LLM error")):
+        assert wait_job(service.prepare(value["video_id"], "sensevoice"))["status"] == "failed"
+        assert transcribe.call_count == 1
+    saved = store.lesson(value["id"])
+    assert saved["asr_backend"] == "sensevoice" and saved["segments"] == new_segments
+    assert not saved["knowledge_points"]
+    with patch.object(service, "pin_video") as pin, patch.object(service, "transcribe") as transcribe, patch.object(service, "extract_knowledge", return_value=value["knowledge_points"]):
+        assert wait_job(service.prepare(value["video_id"], "sensevoice"))["status"] == "succeeded"
+        pin.assert_not_called()
+        transcribe.assert_not_called()
+    assert store.lesson(value["id"])["version"] == 2
+
+
+def test_running_task_keeps_its_model_and_rejects_switch(monkeypatch):
+    value = lesson(segments=False)
+    entered, release = threading.Event(), threading.Event()
+    def transcribe(path, job):
+        entered.set()
+        assert release.wait(3)
+        assert job["request"]["asr_backend"] == "sensevoice"
+        return [{"start": 0, "end": 1, "text": "原文"}]
+    with patch.object(service, "pin_video", return_value=Path("source.mp4")), patch.object(service, "unpin_video"), patch.object(service, "transcribe", side_effect=transcribe), patch.object(service, "extract_knowledge", return_value=[{"id": "p", "title": "概念", "detail": "讲解", "formulas": "", "segment_ids": [0]}]):
+        task = service.prepare(value["video_id"], "sensevoice")
+        assert entered.wait(1)
+        try:
+            monkeypatch.setattr(settings, "asr_backend", "qwen3")
+            assert service.prepare(value["video_id"], "sensevoice") == task
+            with pytest.raises(HTTPException) as conflict:
+                service.prepare(value["video_id"], "qwen3")
+            assert conflict.value.status_code == 409
+        finally:
+            release.set()
+        assert wait_job(task)["status"] == "succeeded"

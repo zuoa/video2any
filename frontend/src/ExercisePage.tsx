@@ -8,16 +8,18 @@ import "./exercises.css";
 
 type QType = "single_choice" | "fill_blank" | "short_answer" | "calculation";
 type Difficulty = "basic" | "practice" | "advanced";
+type ASRBackend = "sensevoice" | "qwen3" | "whisper";
+type ASROptions = { default_backend: ASRBackend; backends: { id: ASRBackend; label: string; description: string }[] };
 type Segment = { start: number; end: number; text: string };
 type Point = { id: string; title: string; detail: string; formulas: string; segment_ids: number[] };
 type Question = { id: string; type: QType; difficulty: Difficulty; stem: string; options: string[]; answer: string; explanation: string; knowledge_point_ids: string[] };
 type Batch = { id: string; version: number; created_at: number; questions: Question[] };
-type Lesson = { id: string; video_id: string; title: string; version: number; duration: number; segments: Segment[]; knowledge_points: Point[]; batches: Batch[]; latest_job_id: string | null; source: { type: string; bv: string | null; page: number | null } };
+type Lesson = { id: string; video_id: string; title: string; version: number; duration: number; asr_backend?: ASRBackend; segments: Segment[]; knowledge_points: Point[]; batches: Batch[]; latest_job_id: string | null; source: { type: string; bv: string | null; page: number | null } };
 type Job = { id: string; lesson_id: string; kind: "prepare" | "generate"; status: "queued" | "running" | "succeeded" | "failed"; stage: string; progress: number; error: string | null; request: Record<string, unknown> | null };
 type Task = { lesson_id: string; job_id: string | null };
 const typeLabels: Record<QType, string> = { single_choice: "单选题", fill_blank: "填空题", short_answer: "简答题", calculation: "计算题" };
 const difficultyLabels: Record<Difficulty, string> = { basic: "基础", practice: "巩固", advanced: "提高" };
-const stages: Record<string, string> = { queued: "等待处理", waiting_for_transcription: "等待语音识别", loading_model: "加载语音模型（首次使用需要下载）", transcribing: "识别讲课语音", extracting_knowledge: "提炼知识点", generating_questions: "生成并复核练习题", done: "处理完成", interrupted: "任务已中断" };
+const stages: Record<string, string> = { queued: "等待处理", waiting_for_transcription: "等待语音识别", loading_model: "加载语音模型（首次使用需要下载）", extracting_audio: "提取视频音轨", detecting_speech: "检测语音片段", transcribing: "识别讲课语音", extracting_knowledge: "提炼知识点", generating_questions: "生成并复核练习题", done: "处理完成", interrupted: "任务已中断" };
 
 async function request<T>(path: string, body?: unknown, method = "POST", signal?: AbortSignal): Promise<T> {
   const response = await fetch(apiUrl(path), body === undefined ? { signal } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
@@ -57,12 +59,27 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
   const [bv, setBv] = useState("");
   const [pages, setPages] = useState<BilibiliPagesResponse | null>(null);
   const [page, setPage] = useState(1);
+  const [asrOptions, setAsrOptions] = useState<ASROptions | null>(null);
   const video = useRef<HTMLVideoElement>(null);
   const active = job?.status === "queued" || job?.status === "running";
   const busy = pending || active;
   const pointsDirty = lesson ? JSON.stringify(points) !== JSON.stringify(lesson.knowledge_points) : false;
   const segmentsDirty = lesson ? JSON.stringify(segments) !== JSON.stringify(lesson.segments) : false;
   const batch = lesson?.batches.find(value => value.id === batchId);
+  const asrBackend = asrOptions?.default_backend;
+  const selectedModel = asrOptions?.backends.find(value => value.id === asrBackend);
+  const currentModel = asrOptions?.backends.find(value => value.id === (lesson?.asr_backend ?? "whisper"));
+
+  useEffect(() => {
+    const controller = new AbortController();
+    request<ASROptions>("/api/exercises/asr/options", undefined, "GET", controller.signal)
+      .then(value => {
+        if (controller.signal.aborted) return;
+        setAsrOptions(value);
+      })
+      .catch(err => { if (!controller.signal.aborted) setError(`无法读取语音模型配置：${err.message}`); });
+    return () => controller.abort();
+  }, []);
 
   function hydrate(value: Lesson) {
     setLesson(value); setSegments(value.segments); setPoints(value.knowledge_points);
@@ -129,6 +146,9 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
         hydrate(await request<Lesson>(`/api/exercises/${task.lesson_id}`));
         if (current.status === "failed") setError(current.error ?? "处理失败，请重试");
       }
+    } else {
+      setJob(null); setJobId(null);
+      hydrate(await request<Lesson>(`/api/exercises/${task.lesson_id}`));
     }
   }
   async function prepare(info: VideoInfo) {
@@ -177,6 +197,10 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
       ? await request<Task>(`/api/exercises/${lesson.id}/generate`, job.request)
       : await request<Task>("/api/exercises/prepare", { video_id: lesson.video_id })));
   }
+  async function switchModel() {
+    if (!lesson) return;
+    await run(async () => acceptTask(await request<Task>("/api/exercises/prepare", { video_id: lesson.video_id })));
+  }
   async function download(kind: "worksheet" | "answers") {
     if (!lesson || !batch) return;
     await run(async () => triggerDownload(await request<ExportResponse>(`/api/exercises/${lesson.id}/export`, { batch_id: batch.id, question_ids: selected, title: title.trim(), kind })));
@@ -190,9 +214,10 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
     <ToolHeader currentPage="exercises" title="讲课视频转练习题" subtitle="提炼知识点，选题组卷，下载可打印 Word" icon={<FileText size={24} />} navigateTo={navigateTo} />
     <section className="exercise-panel">
       <h2>1. 导入讲课视频</h2>
+      <p className="exercise-note">当前语音识别模型：{selectedModel?.label ?? "读取配置中…"}{selectedModel ? ` · ${selectedModel.description}` : ""}</p>
       <div className="exercise-source">
-        <label className="exercise-upload"><Upload size={18} /> 上传视频<input type="file" accept="video/*" disabled={busy} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ""; }} /></label>
-        <div className="exercise-bili"><input aria-label="BV 号或 B 站地址" placeholder="BV 号或 Bilibili 视频地址" value={bv} disabled={busy} onChange={event => { setBv(event.target.value); setPages(null); }} /><button disabled={busy || !bv.trim()} onClick={() => void discoverBili()}>读取视频</button></div>
+        <label className="exercise-upload"><Upload size={18} /> 上传视频<input type="file" accept="video/*" disabled={busy || !asrOptions} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ""; }} /></label>
+        <div className="exercise-bili"><input aria-label="BV 号或 B 站地址" placeholder="BV 号或 Bilibili 视频地址" value={bv} disabled={busy} onChange={event => { setBv(event.target.value); setPages(null); }} /><button disabled={busy || !asrOptions || !bv.trim()} onClick={() => void discoverBili()}>读取视频</button></div>
       </div>
       {pages && pages.pages.length > 1 ? <div className="exercise-row"><label>分 P <select value={page} disabled={busy} onChange={event => setPage(Number(event.target.value))}>{pages.pages.map(p => <option key={p.page} value={p.page}>P{p.page} · {p.title}</option>)}</select></label><button disabled={busy} onClick={() => void run(() => downloadBili(pages.bv, page))}>下载并识别</button></div> : null}
       <p className="exercise-note">根据讲解语音生成。PPT 或板书中未念出的内容，可在转写文字或知识点中手动补充。</p>
@@ -203,7 +228,11 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
     {lesson ? <>
       <section className="exercise-panel">
         <h2>2. 校对文字，确认知识点</h2>
-        <p>{lesson.title} · {time(lesson.duration)} · 内容版本 {lesson.version}</p>
+        <p>{lesson.title} · {time(lesson.duration)} · 内容版本 {lesson.version} · {currentModel?.label ?? lesson.asr_backend ?? "Whisper"}</p>
+        {(lesson.asr_backend ?? "whisper") !== asrBackend && asrOptions ? <div className="exercise-model-switch">
+          <button disabled={busy || pointsDirty || segmentsDirty} onClick={() => void switchModel()}>使用 {selectedModel?.label} 重新识别</button>
+          <p className="exercise-note">重新识别会替换当前转写文字和知识点，旧题目批次保留。需要原视频仍在缓存中。请先保存当前修改。</p>
+        </div> : null}
         <details><summary>查看视频与转写文字（{segments.length} 段）</summary>
           <video ref={video} controls preload="metadata" src={apiUrl(`/api/videos/${lesson.video_id}/file`)} className="exercise-video" />
           <p className="exercise-note">原视频缓存过期后仍可使用已保存的文字和题目。时间戳保持原视频位置，补充公式可用 $...$ 或 $$...$$。</p>

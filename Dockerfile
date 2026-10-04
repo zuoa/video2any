@@ -11,6 +11,7 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
     HF_ENDPOINT=https://hf-mirror.com \
+    HF_HUB_DISABLE_XET=1 \
     FRONTEND_DIST=/app/frontend/dist
 
 WORKDIR /app
@@ -22,11 +23,15 @@ RUN apt-get update \
         fonts-dejavu-core \
         fonts-noto-cjk \
         pandoc \
+        libsndfile1 \
+        sox \
         gifsicle \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+# This image uses CPU inference. Avoid downloading the CUDA wheel dependencies.
+RUN pip install --no-cache-dir torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
