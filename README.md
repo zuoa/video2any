@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 主页 `/#/` 提供工具选择入口，目前包含视频转 GIF 和 BV 音频片段提取。
+- 主页 `/#/` 提供工具选择入口，目前包含视频转 GIF、BV 音频片段提取、视频总结和讲课视频转练习题。
 - GIF 工具 `/#/gif` 支持上传本地视频，或输入 Bilibili BV 号 / `bilibili.com/video/BV...` 地址下载视频；URL 会自动提取 BV 与 `p` 参数，多分 P 视频可选择具体分 P。
 - 在视频上拖拽框选裁剪区域，预览阶段使用遮罩显示选区。
 - 可通过播放位置滑块定位片段，使用开始时间和持续秒数控制导出范围。
@@ -28,7 +28,7 @@ docker run --rm -p 8000:8000 -v video2emoticon-data:/data video2emoticon
 也可以使用 Compose：
 
 ```bash
-mkdir -p data/uploads data/downloads data/outputs data/fonts cookies
+mkdir -p data/uploads data/downloads data/outputs data/fonts data/exercises data/models cookies
 docker compose pull
 docker compose up
 ```
@@ -140,6 +140,45 @@ docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/<repo>:late
 - Python 3.12
 - FFmpeg
 - yt-dlp
-- DejaVu 字体
+- DejaVu 与 Noto 中文字体
+- Pandoc（Word 原生公式导出）
+- faster-whisper（CPU 语音识别）
 
 Bilibili 下载取决于部署环境网络可达性和 cookie 有效性。部分视频如果需要会员、地区权限或 cookie 过期，yt-dlp 可能无法下载，后端会把失败原因返回给前端。
+
+## 讲课视频转练习题
+
+`/#/exercises` 支持上传讲课视频，或输入 B 站 BV / URL 并选择单个分 P。下载或上传完成后，在服务端 CPU 上通过 **faster-whisper** 识别语音，再使用现有 `OPENAI_*` 配置提炼知识点。
+
+1. 查看带时间戳的转写，校对术语、补充没有念出的板书公式；保存后重新提炼知识点。
+2. 编辑知识点并保存，勾选出题范围。
+3. 选择单选、填空、简答、计算题，设置基础 / 巩固 / 提高难度及生成数量（1–30，默认 10）。
+4. 预览候选题及答案解析，勾选需要的题目，分别下载 **练习卷 Word** 和 **答案解析 Word**。
+
+两份文件按相同顺序连续编号，使用 A4 黑白排版；练习卷保留答题空间。网页支持 Markdown 与 LaTeX，Word 通过 Pandoc 转换为可编辑的原生公式，支持分式、根号、上下标、积分、求和、矩阵与分段函数。使用 `$...$` / `$$...$$`，不支持自定义宏或 LaTeX 绘图。候选题只预览和勾选，不提供题目编辑器；可以重新生成独立批次，旧题目及其知识点版本会保留。
+
+长视频按完整转写分段提炼，不截掉后半段。只分析语音文字，不自动识别 PPT 或板书画面；可手动补充。题数少于所选知识点时，从选定范围均匀取点。模型生成后会复核答案和解析，仍建议在打印前查看候选题。
+
+转写和出题为后台任务，页面显示阶段及进度，刷新后恢复最近课程；页面地址中的 `lesson` 参数也可以重新打开该课程。错误可重试，已完成的转写会复用。课程文字、知识点与题目批次保存在 `/data/exercises/exercises.db`，与 24 小时原视频缓存独立；处理中的原视频不会被清理。服务重启会把未完成任务标记为中断，可手动重试。
+
+新增环境变量：
+
+- `WHISPER_MODEL`：默认 `small`（多语言）；也可传本地 CTranslate2 模型目录。
+- `WHISPER_CPU_THREADS`：CPU 推理线程数，默认 `4`，转写任务串行执行。
+- `WHISPER_MODEL_DIR`：模型缓存路径，默认 `DATA_DIR/models`。
+- `EXERCISE_MAX_INPUT_CHARS`：知识点提炼每段原文预算，默认 `9000`。
+
+Docker 镜像包含 Pandoc 和 Noto 中文字体。Compose 持久挂载 `./data/exercises` 与 `./data/models`。首次使用需能访问 Hugging Face 下载模型；离线部署可预先放入转换好的模型并配置 `WHISPER_MODEL`。语音识别不需要 GPU 或外部转写接口；知识点与出题需要有效的 `OPENAI_API_KEY`。
+
+本地运行 Word 导出还需安装 Pandoc 和 Noto Serif CJK SC 字体（Linux 可安装 `pandoc fonts-noto-cjk`，macOS 可使用 Homebrew 安装 Pandoc 并安装 Noto 中文字体）。请保持单个 Uvicorn worker；本模块的工作池及清理保护由单进程管理。
+
+验证：
+
+```bash
+.venv/bin/pip install pytest httpx
+.venv/bin/python -m pytest backend/tests
+cd frontend
+npm run build
+```
+
+Word 集成测试需要 Pandoc；也可在测试环境安装 `pypandoc_binary`，不影响生产依赖。

@@ -19,6 +19,8 @@ RUN apt-get update \
         ca-certificates \
         ffmpeg \
         fonts-dejavu-core \
+        fonts-noto-cjk \
+        pandoc \
         gifsicle \
     && rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +30,7 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend /app/backend
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
-RUN mkdir -p /data/uploads /data/downloads /data/outputs /data/cookies /data/fonts
+RUN mkdir -p /data/uploads /data/downloads /data/outputs /data/cookies /data/fonts /data/exercises /data/models
 
 EXPOSE 8000
 

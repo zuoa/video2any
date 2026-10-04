@@ -535,7 +535,32 @@ def _video_dir_timestamp(path: Path) -> float:
     return path.stat().st_mtime
 
 
+_source_guard = threading.RLock()
+_source_pins: dict[str, int] = {}
+
+
+def pin_video(video_id: str) -> Path:
+    with _source_guard:
+        path = get_video_file(video_id)
+        _source_pins[video_id] = _source_pins.get(video_id, 0) + 1
+        return path
+
+
+def unpin_video(video_id: str) -> None:
+    with _source_guard:
+        count = _source_pins.get(video_id, 0)
+        if count <= 1:
+            _source_pins.pop(video_id, None)
+        else:
+            _source_pins[video_id] = count - 1
+
+
 def delete_old_videos(max_age_seconds: float, now: float | None = None) -> int:
+    with _source_guard:
+        return _delete_old_videos(max_age_seconds, now)
+
+
+def _delete_old_videos(max_age_seconds: float, now: float | None = None) -> int:
     current_time = time.time() if now is None else now
     cutoff = current_time - max_age_seconds
     deleted = 0
@@ -544,7 +569,7 @@ def delete_old_videos(max_age_seconds: float, now: float | None = None) -> int:
         if not base_dir.exists():
             continue
         for path in base_dir.iterdir():
-            if not path.is_dir():
+            if not path.is_dir() or path.name in _source_pins:
                 continue
             try:
                 timestamp = _video_dir_timestamp(path)

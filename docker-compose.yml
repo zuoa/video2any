@@ -8,6 +8,8 @@ services:
       - ./data/downloads:/data/downloads
       - ./data/outputs:/data/outputs
       - ./data/summaries:/data/summaries
+      - ./data/exercises:/data/exercises
+      - ./data/models:/data/models
       - ./data/fonts:/data/fonts
       - ./cookies:/data/cookies
     environment:
@@ -18,4 +20,7 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
       OPENAI_TIMEOUT: ${OPENAI_TIMEOUT:-60}
       SUMMARY_MAX_INPUT_CHARS: ${SUMMARY_MAX_INPUT_CHARS:-9000}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-4}
+      EXERCISE_MAX_INPUT_CHARS: ${EXERCISE_MAX_INPUT_CHARS:-9000}
       SITE_URL: ${SITE_URL:-}

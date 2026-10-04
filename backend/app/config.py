@@ -17,6 +17,11 @@ class Settings:
         self.cookies_dir = self.data_dir / "cookies"
         self.fonts_dir = self.data_dir / "fonts"
         self.summaries_dir = self.data_dir / "summaries"
+        self.exercises_dir = self.data_dir / "exercises"
+        self.whisper_models_dir = Path(os.getenv("WHISPER_MODEL_DIR", str(self.data_dir / "models")))
+        self.whisper_model = os.getenv("WHISPER_MODEL", "small")
+        self.whisper_cpu_threads = max(1, int(os.getenv("WHISPER_CPU_THREADS", "4")))
+        self.exercise_max_input_chars = max(1000, int(os.getenv("EXERCISE_MAX_INPUT_CHARS", "9000")))
         self.bilibili_cookies_file = os.getenv("BILIBILI_COOKIES_FILE") or os.getenv(
             "BILIBILI_COOKIE_FILE"
         )
@@ -48,6 +53,8 @@ class Settings:
         self.cookies_dir.mkdir(parents=True, exist_ok=True)
         self.fonts_dir.mkdir(parents=True, exist_ok=True)
         self.summaries_dir.mkdir(parents=True, exist_ok=True)
+        self.exercises_dir.mkdir(parents=True, exist_ok=True)
+        self.whisper_models_dir.mkdir(parents=True, exist_ok=True)
         self._write_bilibili_cookies_from_env()
 
     def prepare_bilibili_cookies_file(self) -> Path | None:

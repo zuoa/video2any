@@ -1,0 +1,241 @@
+import { useEffect, useRef, useState } from "react";
+import { Download, FileText, Loader2, RefreshCw, Upload } from "lucide-react";
+import { ToolHeader, SiteFooter, apiUrl, parseBilibiliInput, triggerDownload } from "./App";
+import type { AppPage } from "./App";
+import type { BilibiliPagesResponse, ExportResponse, VideoInfo } from "./types";
+import { MathMarkdown } from "./MathMarkdown";
+import "./exercises.css";
+
+type QType = "single_choice" | "fill_blank" | "short_answer" | "calculation";
+type Difficulty = "basic" | "practice" | "advanced";
+type Segment = { start: number; end: number; text: string };
+type Point = { id: string; title: string; detail: string; formulas: string; segment_ids: number[] };
+type Question = { id: string; type: QType; difficulty: Difficulty; stem: string; options: string[]; answer: string; explanation: string; knowledge_point_ids: string[] };
+type Batch = { id: string; version: number; created_at: number; questions: Question[] };
+type Lesson = { id: string; video_id: string; title: string; version: number; duration: number; segments: Segment[]; knowledge_points: Point[]; batches: Batch[]; latest_job_id: string | null; source: { type: string; bv: string | null; page: number | null } };
+type Job = { id: string; lesson_id: string; kind: "prepare" | "generate"; status: "queued" | "running" | "succeeded" | "failed"; stage: string; progress: number; error: string | null; request: Record<string, unknown> | null };
+type Task = { lesson_id: string; job_id: string | null };
+const typeLabels: Record<QType, string> = { single_choice: "单选题", fill_blank: "填空题", short_answer: "简答题", calculation: "计算题" };
+const difficultyLabels: Record<Difficulty, string> = { basic: "基础", practice: "巩固", advanced: "提高" };
+const stages: Record<string, string> = { queued: "等待处理", waiting_for_transcription: "等待语音识别", loading_model: "加载语音模型（首次使用需要下载）", transcribing: "识别讲课语音", extracting_knowledge: "提炼知识点", generating_questions: "生成并复核练习题", done: "处理完成", interrupted: "任务已中断" };
+
+async function request<T>(path: string, body?: unknown, method = "POST", signal?: AbortSignal): Promise<T> {
+  const response = await fetch(apiUrl(path), body === undefined ? { signal } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+  const value = await response.json();
+  if (!response.ok) throw new Error(typeof value.detail === "string" ? value.detail : "请求失败，请重试");
+  return value as T;
+}
+function lastLesson(): string {
+  const query = window.location.hash.split("?")[1] ?? "";
+  const linked = new URLSearchParams(query).get("lesson");
+  if (linked) return linked;
+  try { return localStorage.getItem("v2a-exercises-v1") ?? ""; } catch { return ""; }
+}
+function time(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, "0")}`;
+}
+function toggle(values: string[], id: string): string[] {
+  return values.includes(id) ? values.filter(value => value !== id) : [...values, id];
+}
+
+export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPage) => void }) {
+  const [lessonId, setLessonId] = useState(lastLesson);
+  const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [job, setJob] = useState<Job | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [points, setPoints] = useState<Point[]>([]);
+  const [chosenPoints, setChosenPoints] = useState<string[]>([]);
+  const [types, setTypes] = useState<QType[]>(Object.keys(typeLabels) as QType[]);
+  const [difficulty, setDifficulty] = useState<Difficulty>("practice");
+  const [count, setCount] = useState(10);
+  const [batchId, setBatchId] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [title, setTitle] = useState("讲课知识练习");
+  const [bv, setBv] = useState("");
+  const [pages, setPages] = useState<BilibiliPagesResponse | null>(null);
+  const [page, setPage] = useState(1);
+  const video = useRef<HTMLVideoElement>(null);
+  const active = job?.status === "queued" || job?.status === "running";
+  const busy = pending || active;
+  const pointsDirty = lesson ? JSON.stringify(points) !== JSON.stringify(lesson.knowledge_points) : false;
+  const segmentsDirty = lesson ? JSON.stringify(segments) !== JSON.stringify(lesson.segments) : false;
+  const batch = lesson?.batches.find(value => value.id === batchId);
+
+  function hydrate(value: Lesson) {
+    setLesson(value); setSegments(value.segments); setPoints(value.knowledge_points);
+    setChosenPoints(value.knowledge_points.map(p => p.id));
+    const latest = value.batches[value.batches.length - 1];
+    setBatchId(latest?.id ?? ""); setSelected(latest?.questions.map(q => q.id) ?? []);
+    setTitle(`${value.title.replace(/\.[^.]+$/, "").slice(0, 90)} 知识练习`);
+  }
+  useEffect(() => {
+    if (!lessonId) return;
+    const controller = new AbortController();
+    setPending(true); setError("");
+    request<Lesson>(`/api/exercises/${lessonId}`, undefined, "GET", controller.signal)
+      .then(value => { hydrate(value); setJobId(value.latest_job_id); })
+      .catch(err => { if (!controller.signal.aborted) setError(String(err.message)); })
+      .finally(() => { if (!controller.signal.aborted) setPending(false); });
+    try { localStorage.setItem("v2a-exercises-v1", lessonId); } catch { /* Storage is optional. */ }
+    return () => controller.abort();
+  }, [lessonId]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
+    const poll = async () => {
+      try {
+        const value = await request<Job>(`/api/exercises/jobs/${jobId}`, undefined, "GET", controller.signal);
+        if (controller.signal.aborted) return;
+        setJob(value); failures = 0;
+        if (value.status === "succeeded" || value.status === "failed") {
+          const updated = await request<Lesson>(`/api/exercises/${value.lesson_id}`, undefined, "GET", controller.signal);
+          if (!controller.signal.aborted) {
+            hydrate(updated);
+            if (value.status === "failed") setError(value.error ?? "处理失败，请重试");
+          }
+          return;
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        failures += 1;
+        setError(`状态读取失败，将自动重试：${err instanceof Error ? err.message : "网络异常"}`);
+      }
+      if (!controller.signal.aborted) timer = setTimeout(poll, Math.min(15000, 2000 * (failures + 1)));
+    };
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [jobId]);
+
+  async function run(action: () => Promise<void>) {
+    setPending(true); setError("");
+    try { await action(); } catch (err) { setError(err instanceof Error ? err.message : "操作失败，请重试"); }
+    finally { setPending(false); }
+  }
+  async function acceptTask(task: Task) {
+    if (task.lesson_id !== lessonId) {
+      setLesson(null); setLessonId(task.lesson_id);
+      window.history.replaceState(null, "", `#/exercises?lesson=${task.lesson_id}`);
+    }
+    if (task.job_id) {
+      const current = await request<Job>(`/api/exercises/jobs/${task.job_id}`);
+      setJob(current); setJobId(task.job_id);
+      if (current.status === "succeeded" || current.status === "failed") {
+        hydrate(await request<Lesson>(`/api/exercises/${task.lesson_id}`));
+        if (current.status === "failed") setError(current.error ?? "处理失败，请重试");
+      }
+    }
+  }
+  async function prepare(info: VideoInfo) {
+    await acceptTask(await request<Task>("/api/exercises/prepare", { video_id: info.id }));
+  }
+  async function upload(file: File | undefined) {
+    if (!file) return;
+    await run(async () => {
+      const form = new FormData(); form.append("file", file);
+      const response = await fetch(apiUrl("/api/videos/upload"), { method: "POST", body: form });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.detail ?? "上传失败");
+      await prepare(value as VideoInfo);
+    });
+  }
+  async function discoverBili() {
+    await run(async () => {
+      const parsed = parseBilibiliInput(bv);
+      if (!parsed) throw new Error("请输入 BV 号或 Bilibili 视频地址");
+      const result = await request<BilibiliPagesResponse>("/api/videos/bilibili/pages", { bv, page: parsed.page });
+      setPages(result); setPage(result.selected_page);
+      if (result.pages.length === 1) await downloadBili(result.bv, result.selected_page);
+    });
+  }
+  async function downloadBili(id: string, selectedPage: number) {
+    await prepare(await request<VideoInfo>("/api/videos/bilibili", { bv: id, page: selectedPage }));
+  }
+  async function saveTranscript() {
+    if (!lesson) return;
+    await run(async () => acceptTask(await request<Task>(`/api/exercises/${lesson.id}`, { version: lesson.version, segments }, "PATCH")));
+  }
+  async function savePoints() {
+    if (!lesson) return;
+    await run(async () => {
+      await request<Task>(`/api/exercises/${lesson.id}`, { version: lesson.version, knowledge_points: points }, "PATCH");
+      hydrate(await request<Lesson>(`/api/exercises/${lesson.id}`));
+    });
+  }
+  async function generate() {
+    if (!lesson) return;
+    await run(async () => acceptTask(await request<Task>(`/api/exercises/${lesson.id}/generate`, { version: lesson.version, knowledge_point_ids: chosenPoints, types, difficulty, count })));
+  }
+  async function retry() {
+    if (!lesson || !job) return;
+    await run(async () => acceptTask(job.kind === "generate" && job.request
+      ? await request<Task>(`/api/exercises/${lesson.id}/generate`, job.request)
+      : await request<Task>("/api/exercises/prepare", { video_id: lesson.video_id })));
+  }
+  async function download(kind: "worksheet" | "answers") {
+    if (!lesson || !batch) return;
+    await run(async () => triggerDownload(await request<ExportResponse>(`/api/exercises/${lesson.id}/export`, { batch_id: batch.id, question_ids: selected, title: title.trim(), kind })));
+  }
+  function jump(segmentId: number) {
+    const start = segments[segmentId]?.start;
+    if (start !== undefined && video.current) { video.current.currentTime = start; void video.current.play().catch(() => {}); }
+  }
+
+  return <main className="app-shell exercise-shell">
+    <ToolHeader currentPage="exercises" title="讲课视频转练习题" subtitle="提炼知识点，选题组卷，下载可打印 Word" icon={<FileText size={24} />} navigateTo={navigateTo} />
+    <section className="exercise-panel">
+      <h2>1. 导入讲课视频</h2>
+      <div className="exercise-source">
+        <label className="exercise-upload"><Upload size={18} /> 上传视频<input type="file" accept="video/*" disabled={busy} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ""; }} /></label>
+        <div className="exercise-bili"><input aria-label="BV 号或 B 站地址" placeholder="BV 号或 Bilibili 视频地址" value={bv} disabled={busy} onChange={event => { setBv(event.target.value); setPages(null); }} /><button disabled={busy || !bv.trim()} onClick={() => void discoverBili()}>读取视频</button></div>
+      </div>
+      {pages && pages.pages.length > 1 ? <div className="exercise-row"><label>分 P <select value={page} disabled={busy} onChange={event => setPage(Number(event.target.value))}>{pages.pages.map(p => <option key={p.page} value={p.page}>P{p.page} · {p.title}</option>)}</select></label><button disabled={busy} onClick={() => void run(() => downloadBili(pages.bv, page))}>下载并识别</button></div> : null}
+      <p className="exercise-note">根据讲解语音生成。PPT 或板书中未念出的内容，可在转写文字或知识点中手动补充。</p>
+    </section>
+    {error ? <div role="alert" className="exercise-error">{error}</div> : null}
+    {pending && !active ? <div className="exercise-status" role="status"><Loader2 className="spin" size={18} /> 正在处理请求…</div> : null}
+    {job ? <div className="exercise-status" role="status">{active ? <Loader2 className="spin" size={18} /> : null}<span>{stages[job.stage] ?? job.stage} {active ? `${job.progress}%` : ""}</span>{active ? <progress value={job.progress} max={100} /> : null}{job.status === "failed" ? <button disabled={busy} onClick={() => void retry()}><RefreshCw size={16} /> 重试任务</button> : null}</div> : null}
+    {lesson ? <>
+      <section className="exercise-panel">
+        <h2>2. 校对文字，确认知识点</h2>
+        <p>{lesson.title} · {time(lesson.duration)} · 内容版本 {lesson.version}</p>
+        <details><summary>查看视频与转写文字（{segments.length} 段）</summary>
+          <video ref={video} controls preload="metadata" src={apiUrl(`/api/videos/${lesson.video_id}/file`)} className="exercise-video" />
+          <p className="exercise-note">原视频缓存过期后仍可使用已保存的文字和题目。时间戳保持原视频位置，补充公式可用 $...$ 或 $$...$$。</p>
+          <div className="exercise-transcript">{segments.map((segment, index) => <label key={index}><button type="button" onClick={() => jump(index)}>{time(segment.start)}</button><textarea aria-label={`转写片段 ${index + 1}`} disabled={busy || pointsDirty} value={segment.text} onChange={event => setSegments(values => values.map((value, i) => i === index ? { ...value, text: event.target.value } : value))} /></label>)}</div>
+          <button disabled={busy || !segmentsDirty || pointsDirty || segments.some(s => !s.text.trim())} onClick={() => void saveTranscript()}>保存文字并重新提炼知识点</button>
+        </details>
+        {points.length ? <>
+          <div className="exercise-row"><button disabled={busy} onClick={() => setChosenPoints(points.map(p => p.id))}>全选知识点</button><span>已选 {chosenPoints.length} / {points.length}</span>{pointsDirty ? <button disabled={busy || segmentsDirty || points.some(p => !p.title.trim() || !p.detail.trim())} onClick={() => void savePoints()}>保存知识点修改</button> : null}</div>
+          <div className="exercise-points">{points.map((point, index) => <article key={point.id} className="exercise-point">
+            <label className="exercise-point-heading"><input type="checkbox" checked={chosenPoints.includes(point.id)} disabled={busy} onChange={() => setChosenPoints(values => toggle(values, point.id))} /><strong>{point.title}</strong></label>
+            <MathMarkdown text={point.detail} />{point.formulas ? <MathMarkdown text={point.formulas} /> : null}
+            <div className="exercise-evidence">{point.segment_ids.slice(0, 8).map(id => <button key={id} onClick={() => jump(id)}>{time(segments[id]?.start ?? 0)}</button>)}{lesson.source.bv ? <a href={`https://www.bilibili.com/video/${lesson.source.bv}?p=${lesson.source.page ?? 1}&t=${Math.floor(segments[point.segment_ids[0]]?.start ?? 0)}`} target="_blank" rel="noreferrer">回看 B 站讲解</a> : null}</div>
+            <details><summary>编辑知识点 / 补充公式</summary>{(["title", "detail", "formulas"] as const).map(field => <label key={field}>{({ title: "标题", detail: "讲解", formulas: "公式" })[field]}<textarea disabled={busy || segmentsDirty} value={point[field]} onChange={event => setPoints(values => values.map((value, i) => i === index ? { ...value, [field]: event.target.value } : value))} /></label>)}</details>
+          </article>)}</div>
+        </> : <p className="exercise-note">{active ? "识别后将在这里展示知识点。" : "尚无知识点；检查任务状态后重试。"}</p>}
+      </section>
+      <section className="exercise-panel">
+        <h2>3. 生成候选题</h2>
+        <fieldset disabled={busy}><legend>题型</legend><div className="exercise-row">{(Object.keys(typeLabels) as QType[]).map(type => <label key={type}><input type="checkbox" checked={types.includes(type)} onChange={() => setTypes(values => toggle(values, type) as QType[])} />{typeLabels[type]}</label>)}</div></fieldset>
+        <div className="exercise-row"><label>难度<select disabled={busy} value={difficulty} onChange={event => setDifficulty(event.target.value as Difficulty)}>{Object.entries(difficultyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>生成数量<input type="number" min={1} max={30} disabled={busy} value={count} onChange={event => setCount(Number(event.target.value))} /></label><button disabled={busy || !chosenPoints.length || !types.length || pointsDirty || segmentsDirty || !Number.isInteger(count) || count < 1 || count > 30} onClick={() => void generate()}>{lesson.batches.length ? "再生成一批题目" : "确认知识点并生成题目"}</button></div>
+        {pointsDirty || segmentsDirty ? <p className="exercise-note">请先保存修改，再生成题目。</p> : null}
+        {chosenPoints.length > count ? <p className="exercise-note">题数少于知识点数，本批会从所选范围均匀取点出题；增加题数可覆盖更多知识点。</p> : null}
+      </section>
+      {lesson.batches.length ? <section className="exercise-panel">
+        <h2>4. 预览选题，下载 Word</h2>
+        <label>题目批次<select disabled={busy} value={batchId} onChange={event => { const value = lesson.batches.find(b => b.id === event.target.value); setBatchId(event.target.value); setSelected(value?.questions.map(q => q.id) ?? []); }}>{lesson.batches.map((value, index) => <option key={value.id} value={value.id}>第 {index + 1} 批 · 内容版本 {value.version} · {value.questions.length} 题</option>)}</select></label>
+        {batch && batch.version !== lesson.version ? <p className="exercise-note">此批题目基于内容版本 {batch.version}。当前内容已更新，可重新生成一批题目。</p> : null}
+        <div className="exercise-row"><button disabled={busy} onClick={() => setSelected(batch?.questions.map(q => q.id) ?? [])}>全选</button><button disabled={busy} onClick={() => setSelected([])}>清空选择</button><strong>已选 {selected.length} 题</strong></div>
+        <div className="exercise-questions">{batch?.questions.map((question, index) => <article key={question.id} className="exercise-question"><label className="exercise-point-heading"><input type="checkbox" disabled={busy} checked={selected.includes(question.id)} onChange={() => setSelected(values => toggle(values, question.id))} /><strong>第 {index + 1} 题</strong><span>{typeLabels[question.type]} · {difficultyLabels[question.difficulty]}</span></label><MathMarkdown text={question.stem} />{question.options.map((option, i) => <div className="exercise-option" key={i}><strong>{String.fromCharCode(65 + i)}.</strong><MathMarkdown text={option} /></div>)}<details><summary>查看答案与解析</summary><h4>答案</h4><MathMarkdown text={question.answer} /><h4>解析</h4><MathMarkdown text={question.explanation} /></details></article>)}</div>
+        <div className="exercise-export"><label>练习卷标题<input maxLength={120} disabled={busy} value={title} onChange={event => setTitle(event.target.value)} /></label><div className="exercise-row"><button disabled={busy || !selected.length || !title.trim()} onClick={() => void download("worksheet")}><Download size={17} /> 下载练习卷 Word</button><button disabled={busy || !selected.length || !title.trim()} onClick={() => void download("answers")}><Download size={17} /> 下载答案解析 Word</button></div><p className="exercise-note">A4 黑白排版，练习卷留答题空间。两份文件按所选题目重新连续编号，公式可在 Word 中编辑。</p></div>
+      </section> : null}
+    </> : null}
+    <SiteFooter currentPage="exercises" navigateTo={navigateTo} />
+  </main>;
+}

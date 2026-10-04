@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import html2canvas from "html2canvas-pro";
 import { toDataURL as renderQrDataUrl } from "qrcode";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, Ref } from "react";
 import type {
   AudioFormat,
@@ -39,6 +39,8 @@ import type {
   TextLayer,
   VideoInfo
 } from "./types";
+
+const ExercisePage = lazy(() => import("./ExercisePage"));
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -86,7 +88,7 @@ interface ParsedBilibiliInput {
   page: number | null;
 }
 
-type AppPage = "home" | "gif" | "audio" | "summary";
+export type AppPage = "home" | "gif" | "audio" | "summary" | "exercises";
 type NavigateTo = (page: AppPage) => void;
 type BilibiliBusy = "pages" | "download";
 type SummaryResultRoute = { name: "summary-result"; bv: string; page: number };
@@ -128,6 +130,7 @@ function routeFromHash(): Route {
     }
     return "summary";
   }
+  if (segments[0] === "exercises") return "exercises";
   if (segments[0] === "gif") {
     return "gif";
   }
@@ -137,7 +140,7 @@ function routeFromHash(): Route {
   return "home";
 }
 
-function apiUrl(path: string): string {
+export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
@@ -253,7 +256,7 @@ function isBilibiliHost(hostname: string): boolean {
   return host === "bilibili.com" || host.endsWith(".bilibili.com");
 }
 
-function parseBilibiliInput(value: string): ParsedBilibiliInput | null {
+export function parseBilibiliInput(value: string): ParsedBilibiliInput | null {
   const text = value.trim();
   if (!text) {
     return null;
@@ -359,7 +362,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-function triggerDownload(response: ExportResponse): void {
+export function triggerDownload(response: ExportResponse): void {
   const anchor = document.createElement("a");
   anchor.href = apiUrl(response.download_url);
   anchor.download = response.filename;
@@ -397,11 +400,14 @@ function ToolNav({ currentPage, navigateTo }: { currentPage: AppPage; navigateTo
         <FileText size={16} />
         总结
       </button>
+      <button className={currentPage === "exercises" ? "active" : ""} type="button" onClick={() => navigateTo("exercises")}>
+        <FileText size={16} />练习题
+      </button>
     </nav>
   );
 }
 
-function ToolHeader({ currentPage, title, subtitle, icon, actions, navigateTo }: ToolHeaderProps) {
+export function ToolHeader({ currentPage, title, subtitle, icon, actions, navigateTo }: ToolHeaderProps) {
   return (
     <header className="topbar">
       <div className="brandline">
@@ -422,7 +428,7 @@ function ToolHeader({ currentPage, title, subtitle, icon, actions, navigateTo }:
   );
 }
 
-function SiteFooter({ currentPage, navigateTo }: { currentPage: AppPage; navigateTo: NavigateTo }) {
+export function SiteFooter({ currentPage, navigateTo }: { currentPage: AppPage; navigateTo: NavigateTo }) {
   return (
     <footer className="site-footer">
       <div className="footer-brand">
@@ -652,14 +658,12 @@ function HomePage({ navigateTo }: { navigateTo: NavigateTo }) {
             <span className="tool-card-copy">整体总结、关键时间点、金句提炼</span>
             <span className="tool-card-action">进入</span>
           </button>
-          <div className="tool-card disabled">
-            <span className="tool-card-icon">
-              <Repeat size={30} />
-            </span>
-            <span className="tool-card-title">更多工具</span>
-            <span className="tool-card-copy">为下一种 video to any 输出预留</span>
-            <span className="tool-card-action">待添加</span>
-          </div>
+          <button className="tool-card" type="button" onClick={() => navigateTo("exercises")}>
+            <span className="tool-card-icon"><FileText size={30} /></span>
+            <span className="tool-card-title">讲课视频转练习题</span>
+            <span className="tool-card-copy">语音识别、知识点提炼、选题导出 Word</span>
+            <span className="tool-card-action">进入</span>
+          </button>
         </div>
       </section>
       <SiteFooter currentPage="home" navigateTo={navigateTo} />
@@ -2964,6 +2968,7 @@ export function App() {
       />
     );
   }
+  if (route === "exercises") return <Suspense fallback={<main className="app-shell">正在加载练习题工具…</main>}><ExercisePage navigateTo={navigateTo} /></Suspense>;
   if (route === "gif") {
     return <GifPage navigateTo={navigateTo} />;
   }

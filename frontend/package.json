@@ -11,10 +11,14 @@
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "html2canvas-pro": "^2.2.0",
+    "katex": "^0.16.47",
     "lucide-react": "^0.468.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
   },

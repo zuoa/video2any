@@ -41,6 +41,8 @@ from .storage import (
 from . import summary_service
 from . import summary_store
 from .summary_service import SummaryConfigError
+from . import exercise_service
+from .exercise_routes import router as exercise_router
 
 
 settings.ensure_dirs()
@@ -55,6 +57,9 @@ app = FastAPI(
     description="Convert uploaded videos or Bilibili BV ids into multiple output formats.",
     version="0.1.0",
 )
+
+app.include_router(exercise_router)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,10 +109,12 @@ async def start_source_video_cleanup() -> None:
 @app.on_event("startup")
 async def init_summary_store() -> None:
     summary_store.init_db()
+    exercise_service.start()
 
 
 @app.on_event("shutdown")
 async def stop_source_video_cleanup() -> None:
+    await asyncio.to_thread(exercise_service.stop)
     if cleanup_task is None:
         return
     cleanup_task.cancel()
@@ -356,6 +363,7 @@ async def export_gif(request: ExportRequest) -> ExportResponse:
 
 def output_media_type(path: Path) -> str:
     return {
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".gif": "image/gif",
         ".m4a": "audio/mp4",
         ".mp3": "audio/mpeg",
