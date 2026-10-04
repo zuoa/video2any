@@ -19,8 +19,8 @@
 ## Docker 运行
 
 ```bash
-docker build -t video2emoticon .
-docker run --rm -p 8000:8000 -v video2emoticon-data:/data video2emoticon
+docker build -t video2any .
+docker run --rm -p 8000:8000 -v video2emoticon-data:/data video2any
 ```
 
 打开 `http://localhost:8000`。
@@ -64,7 +64,7 @@ docker run --rm \
   -p 8000:8000 \
   -v video2emoticon-data:/data \
   -e BILIBILI_COOKIE_HEADER='SESSDATA=...; bili_jct=...; DedeUserID=...' \
-  video2emoticon
+  video2any
 ```
 
 还支持把 Netscape cookies 文件内容放到 `BILIBILI_COOKIES` 环境变量中，服务会写入 `/data/cookies/bilibili.cookies.txt` 后交给 `yt-dlp`。
@@ -104,15 +104,15 @@ npm run dev
 非 pull request 事件会推送到：
 
 ```text
-ghcr.io/<owner>/<repo>:latest
-ghcr.io/<owner>/<repo>:<branch-or-tag>
-ghcr.io/<owner>/<repo>:sha-<commit>
+ghcr.io/<owner>/video2any:latest
+ghcr.io/<owner>/video2any:<branch-or-tag>
+ghcr.io/<owner>/video2any:sha-<commit>
 ```
 
 部署时挂载 `/data`：
 
 ```bash
-docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/<repo>:latest
+docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/video2any:latest
 ```
 
 如果用 Compose 部署，按本仓库的 `docker-compose.yml` 会映射到当前目录下的 `data/` 和 `cookies/`。

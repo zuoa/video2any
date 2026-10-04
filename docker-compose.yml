@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.nju.edu.cn/zuoa/video2emoticon:latest
+    image: ghcr.nju.edu.cn/zuoa/video2any:latest
     ports:
       - "8005:8000"
     volumes:
