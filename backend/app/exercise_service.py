@@ -103,7 +103,20 @@ def transcribe(path: Path, job):
         try:
             from faster_whisper import WhisperModel
             if _model is None:
-                _model = WhisperModel(settings.whisper_model, device="cpu", compute_type="int8", cpu_threads=settings.whisper_cpu_threads, download_root=str(settings.whisper_models_dir))
+                _model = WhisperModel(
+                    settings.whisper_model,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=settings.whisper_cpu_threads,
+                    download_root=str(settings.whisper_models_dir),
+                )
+        except Exception as exc:
+            raise VideoProcessingError(
+                f"语音识别模型加载失败（模型：{settings.whisper_model}，下载源：{settings.hf_endpoint}）。"
+                "请检查容器网络及 HF_ENDPOINT 配置，或通过 WHISPER_MODEL 指定本地 CTranslate2 模型目录："
+                f"{exc}"
+            ) from exc
+        try:
             _progress(job, "transcribing", 1)
             segments, info = _model.transcribe(str(path), vad_filter=True, beam_size=5)
             result = []
@@ -112,7 +125,7 @@ def transcribe(path: Path, job):
                     result.append(Segment(start=segment.start, end=segment.end, text=segment.text).model_dump())
                 _progress(job, "transcribing", min(70, int(70 * segment.end / max(info.duration, 1))))
         except Exception as exc:
-            raise VideoProcessingError(f"语音识别失败，请检查模型下载网络或 WHISPER_MODEL 配置：{exc}") from exc
+            raise VideoProcessingError(f"语音识别失败：{exc}") from exc
     if not result:
         raise VideoProcessingError("未识别到有效语音，请换一个有讲解内容的视频。")
     return result

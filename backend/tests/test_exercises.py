@@ -199,6 +199,24 @@ def test_asr_consumes_lazy_segments_on_cpu_and_reports_empty_speech():
         service.transcribe(Path("video.mp4"), {"id": "asr", "lesson_id": "lesson"})
 
 
+def test_model_download_failure_reports_endpoint_and_can_retry():
+    job = {"id": "asr", "lesson_id": "lesson"}
+    failure = ConnectionError("Network is unreachable")
+    with patch("faster_whisper.WhisperModel", side_effect=failure):
+        with pytest.raises(VideoProcessingError, match="HF_ENDPOINT") as error:
+            service.transcribe(Path("video.mp4"), job)
+    assert settings.hf_endpoint in str(error.value)
+    assert "WHISPER_MODEL" in str(error.value)
+    assert error.value.__cause__ is failure
+    assert service._model is None
+    model = SimpleNamespace(transcribe=lambda *a, **k: (
+        iter([SimpleNamespace(start=0, end=2, text="重试成功")]), SimpleNamespace(duration=3)
+    ))
+    with patch("faster_whisper.WhisperModel", return_value=model) as constructor:
+        assert service.transcribe(Path("video.mp4"), job)[0]["text"] == "重试成功"
+    assert constructor.call_args.kwargs["download_root"] == str(settings.whisper_models_dir)
+
+
 def test_http_contract_and_validation():
     app = FastAPI()
     app.include_router(router)

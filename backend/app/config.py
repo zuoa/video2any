@@ -5,6 +5,8 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# huggingface_hub reads HF_ENDPOINT at import time, before model downloads start.
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 
 class Settings:
@@ -20,6 +22,7 @@ class Settings:
         self.exercises_dir = self.data_dir / "exercises"
         self.whisper_models_dir = Path(os.getenv("WHISPER_MODEL_DIR", str(self.data_dir / "models")))
         self.whisper_model = os.getenv("WHISPER_MODEL", "small")
+        self.hf_endpoint = os.environ["HF_ENDPOINT"]
         self.whisper_cpu_threads = max(1, int(os.getenv("WHISPER_CPU_THREADS", "4")))
         self.exercise_max_input_chars = max(1000, int(os.getenv("EXERCISE_MAX_INPUT_CHARS", "9000")))
         self.bilibili_cookies_file = os.getenv("BILIBILI_COOKIES_FILE") or os.getenv(

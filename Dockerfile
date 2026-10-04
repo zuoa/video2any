@@ -10,6 +10,7 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
+    HF_ENDPOINT=https://hf-mirror.com \
     FRONTEND_DIST=/app/frontend/dist
 
 WORKDIR /app

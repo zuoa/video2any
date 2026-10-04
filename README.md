@@ -164,11 +164,16 @@ Bilibili 下载取决于部署环境网络可达性和 cookie 有效性。部分
 新增环境变量：
 
 - `WHISPER_MODEL`：默认 `small`（多语言）；也可传本地 CTranslate2 模型目录。
+- `HF_ENDPOINT`：模型下载地址，默认 `https://hf-mirror.com`（第三方国内镜像）；可设为 `https://huggingface.co` 使用官方源，或指定其他兼容镜像。
 - `WHISPER_CPU_THREADS`：CPU 推理线程数，默认 `4`，转写任务串行执行。
 - `WHISPER_MODEL_DIR`：模型缓存路径，默认 `DATA_DIR/models`。
 - `EXERCISE_MAX_INPUT_CHARS`：知识点提炼每段原文预算，默认 `9000`。
 
-Docker 镜像包含 Pandoc 和 Noto 中文字体。Compose 持久挂载 `./data/exercises` 与 `./data/models`。首次使用需能访问 Hugging Face 下载模型；离线部署可预先放入转换好的模型并配置 `WHISPER_MODEL`。语音识别不需要 GPU 或外部转写接口；知识点与出题需要有效的 `OPENAI_API_KEY`。
+Docker 镜像包含 Pandoc 和 Noto 中文字体。Compose 持久挂载 `./data/exercises` 与 `./data/models`。首次使用默认通过 `hf-mirror.com` 下载模型，下载后缓存持久保留；离线部署可预先放入转换好的模型并配置 `WHISPER_MODEL`。语音识别不需要 GPU 或外部转写接口；知识点与出题需要有效的 `OPENAI_API_KEY`。
+
+如果首次下载提示 `Network is unreachable`，请检查容器能否访问下载源。在 `.env` 中设置 `HF_ENDPOINT=https://hf-mirror.com`（或其他可达的兼容地址），并确保 `docker-compose.yml` 的 `environment` 包含 `HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}`，然后运行 `docker compose up -d --force-recreate app`，再在页面重试。只修改 `.env` 而未在 Compose 中传入该变量不会生效；`docker compose restart` 也不会应用新的环境变量。本地开发可用 `HF_ENDPOINT=https://hf-mirror.com uvicorn backend.app.main:app --reload` 指定下载源；变量必须在启动进程前设置。
+
+若镜像仍不可达，或重定向到无法访问的官方源，请配置可用的下载源或网络代理，也可离线准备模型目录并挂载到容器，再将 `WHISPER_MODEL` 设为该目录的容器内路径。
 
 本地运行 Word 导出还需安装 Pandoc 和 Noto Serif CJK SC 字体（Linux 可安装 `pandoc fonts-noto-cjk`，macOS 可使用 Homebrew 安装 Pandoc 并安装 Noto 中文字体）。请保持单个 Uvicorn worker；本模块的工作池及清理保护由单进程管理。
 
