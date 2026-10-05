@@ -72,19 +72,41 @@ def validate_points(points, segments):
     return values
 
 
-def _structured(prompt, validate, max_tokens=5000):
+def _structured(prompt, validate, max_tokens=5000, *, history=None):
     """One repair attempt, never accept plain prose or partial structured output."""
+    original_prompt = prompt
+    working_history = [dict(message) for message in history] if history is not None else None
     for attempt in range(2):
-        content = _chat(RULES + prompt, max_tokens=max_tokens)
+        if working_history is None:
+            content = _chat(RULES + prompt, max_tokens=max_tokens)
+        else:
+            content = _chat(prompt, max_tokens=max_tokens, history=working_history)
         try:
             parsed = _extract_json_object(content)
             if parsed is None:
                 raise ValueError("返回内容不是有效 JSON 对象")
-            return validate(parsed)
+            value = validate(parsed)
+            if history is not None:
+                # Keep successful full responses for subsequent batches/reviews.
+                # Invalid output is only needed during this repair attempt.
+                history.extend([
+                    {"role": "user", "content": original_prompt},
+                    {"role": "assistant", "content": content},
+                ])
+            return value
         except ValueError as exc:
             if attempt:
                 raise VideoProcessingError(f"大模型结果校验失败：{exc}") from exc
-            prompt += f"\n上次输出不合要求：{exc}。重新完整输出正确 JSON，不要省略内容。"
+            logger.warning("LLM output validation failed; regenerating once (not a network retry): %s", exc)
+            repair = f"上次输出不合要求：{exc}。重新完整输出正确 JSON，不要省略内容。"
+            if working_history is None:
+                prompt += "\n" + repair
+            else:
+                working_history.extend([
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": content},
+                ])
+                prompt = repair
     raise AssertionError("unreachable")
 
 
@@ -174,39 +196,67 @@ def _validate_questions(parsed, count, ids, request):
     return questions
 
 
+def _question_prompt(lesson, points, assignments, difficulty):
+    point_ids = {point_id for assignment in assignments for point_id in assignment["knowledge_point_ids"]}
+    selected = [point for point in points if point["id"] in point_ids]
+    segment_ids = sorted({index for point in selected for index in point["segment_ids"]})
+    evidence = [{"id": index, **lesson["segments"][index]} for index in segment_ids]
+    return f"""根据已确认知识点和原文生成本批 {len(assignments)} 道完整练习题，难度 {difficulty}。
+严格按以下分配顺序出题，每题的 type 和 knowledge_point_ids 必须与对应项一致：
+{json.dumps(assignments, ensure_ascii=False)}
+题干自包含，避免“老师说了什么”之类回忆题；历史 assistant 消息包含此前生成和复核的完整题目，请避免重复题干和解题内容。
+单选题四个选项，options 不带 A/B/C/D 前缀，answer 只能是 A/B/C/D；其他题 options=[]。
+答案明确，解析完整，计算题给出步骤，填空题用（________）标记填空位置。
+只返回本批题目，不要重复输出历史批次。
+返回 {{"questions":[{{"id":"临时编号","type":"题型","difficulty":"{difficulty}","stem":"题干","options":[],"answer":"答案","explanation":"解析","knowledge_point_ids":["对应知识点 ID"]}}]}}。
+知识点：{json.dumps(selected, ensure_ascii=False)}
+原文：{json.dumps(evidence, ensure_ascii=False)}"""
+
+
+def _question_batches(lesson, points, request):
+    batches, current = [], []
+    for index in range(request.count):
+        point = points[min(len(points) - 1, index * len(points) // request.count)]
+        assignment = {"type": request.types[index % len(request.types)], "knowledge_point_ids": [point["id"]]}
+        candidate = current + [assignment]
+        # Merge across knowledge points, but split unusually large source text.
+        if current and (len(candidate) > 5 or len(_question_prompt(lesson, points, candidate, request.difficulty)) > settings.exercise_max_input_chars * 3):
+            batches.append(current)
+            current = []
+        current.append(assignment)
+        if len(_question_prompt(lesson, points, current, request.difficulty)) > settings.exercise_max_input_chars * 3:
+            raise VideoProcessingError("该知识点内容过长，请拆分知识点或缩短讲解后重试。")
+    if current:
+        batches.append(current)
+    return batches
+
+
 def generate_questions(lesson, request, job):
     selected = [p for p in lesson["knowledge_points"] if p["id"] in request.knowledge_point_ids]
-    assignments = {}
-    for i in range(request.count):
-        point = selected[min(len(selected) - 1, i * len(selected) // request.count)]
-        assignments.setdefault(point["id"], (point, []))[1].append(request.types[i % len(request.types)])
+    batches = _question_batches(lesson, selected, request)
     questions = []
-    for point, types in assignments.values():
-        for offset in range(0, len(types), 5):
-            wanted_types = types[offset:offset + 5]
-            _progress(job, "generating_questions", int(90 * len(questions) / request.count))
-            evidence = [lesson["segments"][i] for i in point["segment_ids"]]
-            prompt = f"""根据已确认知识点和原文生成 {len(wanted_types)} 道完整练习题。
-题型依次为 {json.dumps(wanted_types)}，难度 {request.difficulty}。
-题干自包含，避免“老师说了什么”之类回忆题；不重复下面已有题目：{json.dumps([q['stem'] for q in questions], ensure_ascii=False)}。
-单选题四个选项，options 不带 A/B/C/D 前缀，answer 只能是 A/B/C/D；其他题 options=[]。
-答案明确，解析完整，计算题给出步骤，填空题用（________）标记填空位置；knowledge_point_ids 仅使用当前知识点 ID。
-返回 {{"questions":[{{"id":"临时编号","type":"题型","difficulty":"{request.difficulty}","stem":"题干","options":[],"answer":"答案","explanation":"解析","knowledge_point_ids":["{point['id']}"]}}]}}。
-知识点：{json.dumps(point, ensure_ascii=False)}
-原文：{json.dumps(evidence, ensure_ascii=False)}"""
-            if len(prompt) > settings.exercise_max_input_chars * 3:
-                raise VideoProcessingError("该知识点内容过长，请拆分知识点或缩短讲解后重试。")
-            def validate(parsed):
-                values = _validate_questions(parsed, len(wanted_types), {point["id"]}, request)
-                if [q["type"] for q in values] != wanted_types:
+    history = [{"role": "system", "content": RULES}]
+    logger.warning("Exercise generation: questions=%d | batches=%d | planned_llm_calls=%d", request.count, len(batches), 2 * len(batches))
+    for assignments in batches:
+        _progress(job, "generating_questions", int(90 * len(questions) / request.count))
+        prompt = _question_prompt(lesson, selected, assignments, request.difficulty)
+        ids = {point_id for assignment in assignments for point_id in assignment["knowledge_point_ids"]}
+
+        def validate(parsed):
+            values = _validate_questions(parsed, len(assignments), ids, request)
+            for value, assignment in zip(values, assignments):
+                if value["type"] != assignment["type"]:
                     raise ValueError("题型顺序与请求不一致")
-                return values
-            generated = _structured(prompt, validate, max_tokens=7000)
-            review = prompt + "\n请复核下列候选题的条件、唯一正确答案、计算及解析；发现错误直接修正，返回同样数量的完整 questions JSON：\n" + json.dumps(generated, ensure_ascii=False)
-            corrected = _structured(review, validate, max_tokens=7000)
-            if [q["type"] for q in corrected] != wanted_types:
-                raise VideoProcessingError("返回题型分配与请求不一致，请重试。")
-            questions.extend(corrected)
+                if value["knowledge_point_ids"] != assignment["knowledge_point_ids"]:
+                    raise ValueError("题目知识点分配与请求不一致")
+            # Reject duplicates before committing a batch, so the repair can fix them.
+            _validate_questions({"questions": questions + values}, len(questions) + len(values), set(request.knowledge_point_ids), request)
+            return values
+
+        _structured(prompt, validate, max_tokens=7000, history=history)
+        review = "请复核上一条 assistant 消息中本批候选题的条件、唯一正确答案、计算及解析；发现错误直接修正。保留本批的题型顺序、难度和知识点分配，避免与更早批次重复，只返回本批同样数量的完整 questions JSON。"
+        corrected = _structured(review, validate, max_tokens=7000, history=history)
+        questions.extend(corrected)
     result = _validate_questions({"questions": questions}, request.count, set(request.knowledge_point_ids), request)
     for question in result:
         question["id"] = unique_id()

@@ -12,7 +12,11 @@ import json
 import logging
 import re
 import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+
+import httpx
 
 from .bili_subtitle import (
     NoSubtitleError,
@@ -27,9 +31,10 @@ from . import summary_store
 logger = logging.getLogger(__name__)
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI, APITimeoutError, APIConnectionError
 except ImportError:  # pragma: no cover - dependency declared in requirements
     OpenAI = None  # type: ignore[assignment]
+    APITimeoutError = APIConnectionError = None
 
 
 class SummaryConfigError(VideoProcessingError):
@@ -47,7 +52,8 @@ def _get_client():
         _client = OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
-            timeout=settings.openai_timeout,
+            timeout=httpx.Timeout(settings.openai_timeout, connect=10, write=30, pool=10),
+            max_retries=2,
         )
     return _client
 
@@ -266,30 +272,58 @@ def _chunk_span_seconds(chunk: str) -> int | None:
 
 # --- LLM calls ---
 
-def _chat(prompt: str, max_tokens: int = 1200) -> str:
+def _chat(prompt: str, max_tokens: int = 1200, *, history: list[dict[str, str]] | None = None) -> str:
+    messages = [dict(message) for message in (history or [])]
+    messages.append({"role": "user", "content": prompt})
     client = _get_client()
     # The OpenAI SDK appends "/chat/completions" to base_url; log the full URL
     # so a 404 (wrong OPENAI_BASE_URL / OPENAI_MODEL) is easy to diagnose.
     endpoint = str(client.base_url).rstrip("/") + "/chat/completions"
+    request_id = uuid.uuid4().hex[:8]
+    started = time.monotonic()
     logger.warning(
-        "LLM request: POST %s | model=%s | max_tokens=%d | prompt_chars=%d",
-        endpoint, settings.openai_model, max_tokens, len(prompt),
+        "LLM request [%s]: POST %s | model=%s | max_tokens=%d | prompt_chars=%d | history_messages=%d | read_timeout=%ss | max_retries=%s",
+        request_id, endpoint, settings.openai_model, max_tokens,
+        sum(len(message["content"]) for message in messages), len(messages) - 1,
+        settings.openai_timeout, client.max_retries,
     )
     try:
         resp = client.chat.completions.create(
             model=settings.openai_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             max_tokens=max_tokens,
             temperature=0.3,
         )
-        return resp.choices[0].message.content or ""
+        content = resp.choices[0].message.content or ""
+        logger.warning(
+            "LLM response [%s]: model=%s | elapsed=%.1fs | output_chars=%d | finish_reason=%s",
+            request_id, settings.openai_model, time.monotonic() - started, len(content), resp.choices[0].finish_reason,
+        )
+        return content
     except Exception as exc:  # noqa: BLE001 - surface as a user-facing error
         logger.error(
-            "LLM call FAILED: POST %s | model=%s | %s", endpoint, settings.openai_model, exc
+            "LLM call FAILED [%s]: POST %s | model=%s | elapsed=%.1fs | error_type=%s | cause=%s | status=%s | %s",
+            request_id, endpoint, settings.openai_model, time.monotonic() - started,
+            type(exc).__name__, type(exc.__cause__).__name__, getattr(exc, "status_code", None), exc,
         )
+        if APITimeoutError is not None and isinstance(exc, APITimeoutError):
+            if isinstance(exc.__cause__, httpx.ConnectTimeout):
+                hint = "连接大模型服务超时，请检查网络、代理及 OPENAI_BASE_URL。"
+            elif isinstance(exc.__cause__, (httpx.WriteTimeout, httpx.PoolTimeout)):
+                hint = "发送请求或等待连接超时，请检查网络及服务负载。"
+            else:
+                hint = f"等待大模型响应超时（OPENAI_TIMEOUT={settings.openai_timeout} 秒）。可提高 OPENAI_TIMEOUT 后重启服务再试。"
+        elif APIConnectionError is not None and isinstance(exc, APIConnectionError):
+            hint = "无法连接大模型服务，请检查网络、代理及 OPENAI_BASE_URL。"
+        elif getattr(exc, "status_code", None) == 429:
+            hint = "大模型服务限流或额度不足，请检查服务端返回信息及账户额度，稍后重试。"
+        elif (getattr(exc, "status_code", None) or 0) >= 500:
+            hint = "大模型服务暂时异常，请稍后重试或检查上游服务状态。"
+        else:
+            hint = "请检查 OPENAI_BASE_URL（OpenAI/中转一般需要以 /v1 结尾，DeepSeek 用 https://api.deepseek.com）与 OPENAI_MODEL。"
         raise VideoProcessingError(
             f"大模型调用失败：POST {endpoint} | model={settings.openai_model} | {exc}。"
-            "请检查 OPENAI_BASE_URL（OpenAI/中转一般需要以 /v1 结尾，DeepSeek 用 https://api.deepseek.com）与 OPENAI_MODEL。"
+            + hint
         ) from exc
 
 

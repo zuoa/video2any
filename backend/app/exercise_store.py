@@ -53,6 +53,15 @@ def lesson_for_video(video_id):
     return json.loads(row["payload"]) if row else None
 
 
+def referenced_video_ids():
+    """Keep lesson source videos across cleanup runs and service restarts."""
+    if not (settings.exercises_dir / "exercises.db").is_file():
+        return set()
+    with connect() as conn:
+        rows = conn.execute("SELECT video_id FROM lessons").fetchall()
+    return {row["video_id"] for row in rows}
+
+
 def save_lesson(value):
     with connect() as conn:
         conn.execute("INSERT INTO lessons VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", (value["id"], value["video_id"], json.dumps(value, ensure_ascii=False)))

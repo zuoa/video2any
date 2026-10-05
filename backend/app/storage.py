@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from fastapi import UploadFile
 
+from . import exercise_store
 from .bili_subtitle import format_timestamp, get_video_info
 from .config import settings
 from .ffmpeg_tools import VideoProcessingError, probe_video, run_checked
@@ -76,7 +77,8 @@ def _write_metadata(info: VideoInfo, source_path: Path, extra_metadata: dict | N
     path.parent.mkdir(parents=True, exist_ok=True)
     created_at = time.time()
     payload = info.model_dump(mode="json")
-    payload["source_path"] = str(source_path)
+    # Resolve against meta.json on read so moving DATA_DIR does not break URLs.
+    payload["source_path"] = source_path.name
     payload["created_at"] = created_at
     payload["last_used_at"] = created_at
     if extra_metadata:
@@ -86,6 +88,15 @@ def _write_metadata(info: VideoInfo, source_path: Path, extra_metadata: dict | N
 
 def _read_metadata(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _resolve_source_path(metadata_path: Path, metadata: dict) -> Path:
+    stored_path = Path(metadata["source_path"])
+    local_path = metadata_path.parent / stored_path.name
+    if local_path.is_file():
+        return local_path.resolve()
+    # Compatibility with metadata written before paths became portable.
+    return stored_path if stored_path.is_absolute() else local_path.resolve()
 
 
 def _touch_metadata(path: Path, metadata: dict) -> None:
@@ -327,7 +338,7 @@ def _cached_bilibili_info(video_id: str, filename: str, bv: str, page: int) -> V
             ):
                 return None
             source_path_raw = metadata.get("source_path")
-            if source_path_raw and Path(source_path_raw).is_file():
+            if source_path_raw and _resolve_source_path(metadata_path, metadata).is_file():
                 _touch_metadata(metadata_path, metadata)
                 return VideoInfo.model_validate(metadata)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -508,6 +519,7 @@ def get_video_metadata(video_id: str) -> dict:
         if path.exists():
             metadata = _read_metadata(path)
             _touch_metadata(path, metadata)
+            metadata["source_path"] = str(_resolve_source_path(path, metadata))
             return metadata
     raise VideoProcessingError("video not found")
 
@@ -515,7 +527,7 @@ def get_video_metadata(video_id: str) -> dict:
 def get_video_file(video_id: str) -> Path:
     metadata = get_video_metadata(video_id)
     path = Path(metadata["source_path"])
-    if not path.exists():
+    if not path.is_file():
         raise VideoProcessingError("video file not found")
     return path
 
@@ -564,12 +576,15 @@ def _delete_old_videos(max_age_seconds: float, now: float | None = None) -> int:
     current_time = time.time() if now is None else now
     cutoff = current_time - max_age_seconds
     deleted = 0
+    # Pins protect active workers; database references also protect completed
+    # and interrupted lessons, without relying on process-local state.
+    retained_video_ids = exercise_store.referenced_video_ids()
 
     for base_dir in (settings.uploads_dir, settings.downloads_dir):
         if not base_dir.exists():
             continue
         for path in base_dir.iterdir():
-            if not path.is_dir() or path.name in _source_pins:
+            if not path.is_dir() or path.name in _source_pins or path.name in retained_video_ids:
                 continue
             try:
                 timestamp = _video_dir_timestamp(path)

@@ -89,10 +89,11 @@ def test_knowledge_extraction_merges_evidence_and_rejects_wrong_ids(monkeypatch)
     assert "后半段" in points[0]["detail"]
 
 
-def test_structured_output_repairs_once_and_never_accepts_prose():
+def test_structured_output_repairs_once_and_never_accepts_prose(caplog):
     with patch.object(service, "_chat", side_effect=["not json", '{"value": 42}']) as chat:
         assert service._structured("prompt", lambda p: p["value"]) == 42
         assert chat.call_count == 2
+        assert "not a network retry" in caplog.text
     with patch.object(service, "_chat", return_value="broken") as chat:
         with pytest.raises(VideoProcessingError):
             service._structured("prompt", lambda p: p)
@@ -130,6 +131,124 @@ def test_generation_review_keeps_requested_count_and_snapshot():
     assert page["slug"] == "er-ci-fang-cheng"
     assert page["questions"] == batch["questions"]
     assert store.recent_pages()["total"] == 1
+
+
+@pytest.mark.parametrize("count", [10, 30])
+def test_generation_merges_points_preserves_assignments_and_carries_history(count):
+    value = lesson()
+    value["knowledge_points"] = [dict(value["knowledge_points"][0], id=f"point-{index}") for index in range(count)]
+    request = GenerateRequest(version=1, knowledge_point_ids=[p["id"] for p in value["knowledge_points"]], count=count)
+    calls, responses = [], []
+    def chat(prompt, max_tokens, *, history):
+        calls.append({"prompt": prompt, "history": json.loads(json.dumps(history))})
+        if len(calls) % 2 == 1:
+            assignments = json.loads(prompt.splitlines()[2])
+            assert len(assignments) == 5
+            # Shared transcript evidence appears only once in this prompt.
+            assert prompt.count(value["segments"][0]["text"]) == 1
+            questions = []
+            for assignment in assignments:
+                point_id = assignment["knowledge_point_ids"][0]
+                kind = assignment["type"]
+                questions.append(question(
+                    id=point_id, type=kind, difficulty=request.difficulty,
+                    stem=f"{point_id}（________）" if kind == "fill_blank" else f"{point_id} 题干",
+                    options=["一", "二", "三", "四"] if kind == "single_choice" else [],
+                    answer="A" if kind == "single_choice" else f"{point_id} 的完整答案",
+                    explanation=f"{point_id} 的完整解析", knowledge_point_ids=[point_id],
+                ))
+            response = json.dumps({"questions": questions}, ensure_ascii=False)
+        else:
+            assert history[-1]["role"] == "assistant"
+            previous = json.loads(history[-1]["content"])
+            # Distinguish the reviewed result from the initial candidates.
+            for q in previous["questions"]:
+                q["explanation"] += "（已复核）"
+            response = json.dumps(previous, ensure_ascii=False)
+        if len(calls) > 1:
+            assert [m["content"] for m in history if m["role"] == "assistant"] == responses
+        responses.append(response)
+        return response
+    with patch.object(service, "_chat", side_effect=chat):
+        result = service.generate_questions(value, request, {"id": "batch-job", "lesson_id": value["id"]})
+    assert len(calls) == 2 * (count // 5)
+    assert len(result) == count
+    assert [q["knowledge_point_ids"] for q in result] == [[p["id"]] for p in value["knowledge_points"]]
+    assert [q["type"] for q in result] == [request.types[index % len(request.types)] for index in range(count)]
+    assert all(q["explanation"].endswith("（已复核）") for q in result)
+    assert len({q["id"] for q in result}) == count
+    assert calls[0]["history"] == [{"role": "system", "content": service.RULES}]
+
+
+def test_structured_repair_sees_invalid_response_and_only_remembers_success():
+    history = [{"role": "system", "content": service.RULES}]
+    calls = []
+    def chat(prompt, max_tokens, *, history):
+        calls.append((prompt, json.loads(json.dumps(history))))
+        return "broken output" if len(calls) == 1 else '{"value": 42}'
+    with patch.object(service, "_chat", side_effect=chat):
+        assert service._structured("原始出题请求", lambda p: p["value"], history=history) == 42
+    assert calls[1][1][-2:] == [
+        {"role": "user", "content": "原始出题请求"},
+        {"role": "assistant", "content": "broken output"},
+    ]
+    assert "不是有效 JSON" in calls[1][0]
+    assert history == [
+        {"role": "system", "content": service.RULES},
+        {"role": "user", "content": "原始出题请求"},
+        {"role": "assistant", "content": '{"value": 42}'},
+    ]
+
+
+def test_later_batch_duplicate_is_repaired_using_previous_questions():
+    value = lesson()
+    request = GenerateRequest(version=1, knowledge_point_ids=["point"], types=["calculation"], count=6)
+    first = [question(id=f"q{index}", stem=f"第 {index} 道题") for index in range(5)]
+    repeated = [question(id="repeat", stem=first[0]["stem"])]
+    last = [question(id="last", stem="新的第六题")]
+    responses = [first, first, repeated, last, last]
+    calls = []
+    def chat(prompt, max_tokens, *, history):
+        calls.append((prompt, json.loads(json.dumps(history))))
+        return json.dumps({"questions": responses[len(calls) - 1]}, ensure_ascii=False)
+    with patch.object(service, "_chat", side_effect=chat):
+        result = service.generate_questions(value, request, {"id": "duplicate-job", "lesson_id": value["id"]})
+    assert len(calls) == 5
+    assert "题目重复" in calls[3][0]
+    assert json.loads(calls[3][1][-1]["content"])["questions"] == repeated
+    assert [json.loads(m["content"])["questions"] for m in calls[4][1] if m["role"] == "assistant"] == [first, first, last]
+    assert len({q["stem"] for q in result}) == 6
+
+
+def test_question_batches_split_large_evidence_without_dropping_points(monkeypatch):
+    value = lesson()
+    monkeypatch.setattr(settings, "exercise_max_input_chars", 1000)
+    value["segments"] = [{"start": index, "end": index + 1, "text": str(index) * 1500} for index in range(5)]
+    value["knowledge_points"] = [dict(value["knowledge_points"][0], id=f"p{index}", segment_ids=[index]) for index in range(5)]
+    request = GenerateRequest(version=1, knowledge_point_ids=[p["id"] for p in value["knowledge_points"]], count=5)
+    batches = service._question_batches(value, value["knowledge_points"], request)
+    assert len(batches) == 5
+    assert [a["knowledge_point_ids"] for batch in batches for a in batch] == [[f"p{index}"] for index in range(5)]
+    assert all(len(service._question_prompt(value, value["knowledge_points"], batch, request.difficulty)) <= 3000 for batch in batches)
+
+
+@pytest.mark.parametrize("wrong_field", ["type", "knowledge_point_ids"])
+def test_merged_batch_rejects_wrong_assignment_and_failed_history_stays_local(wrong_field):
+    value = lesson()
+    value["knowledge_points"].append(dict(value["knowledge_points"][0], id="other"))
+    request = GenerateRequest(version=1, knowledge_point_ids=["point", "other"], types=["calculation", "short_answer"], count=2)
+    valid = [question(), question(id="q2", type="short_answer", stem="第二题", knowledge_point_ids=["other"])]
+    invalid = json.loads(json.dumps(valid))
+    if wrong_field == "type":
+        invalid[0]["type"] = "short_answer"
+    else:
+        invalid[0]["knowledge_point_ids"] = ["other"]
+    with patch.object(service, "_chat", return_value=json.dumps({"questions": invalid})):
+        with pytest.raises(VideoProcessingError, match="分配|顺序"):
+            service.generate_questions(value, request, {"id": "failed-job", "lesson_id": value["id"]})
+    with patch.object(service, "_chat", return_value=json.dumps({"questions": valid})) as chat:
+        assert len(service.generate_questions(value, request, {"id": "fresh-job", "lesson_id": value["id"]})) == 2
+        assert chat.call_args_list[0].kwargs["history"] == [{"role": "system", "content": service.RULES}]
 
 
 def saved_batch(value, batch_id="batch", created_at=100):

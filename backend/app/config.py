@@ -59,7 +59,7 @@ class Settings:
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
         self.openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com")
         self.openai_model = os.getenv("OPENAI_MODEL", "deepseek-chat")
-        self.openai_timeout = int(os.getenv("OPENAI_TIMEOUT", "60"))
+        self.openai_timeout = int(os.getenv("OPENAI_TIMEOUT", "300"))
         self.summary_max_input_chars = int(os.getenv("SUMMARY_MAX_INPUT_CHARS", "9000"))
         self.bili_rate_limit_seconds = float(os.getenv("BILI_RATE_LIMIT_SECONDS", "1.0"))
         self.site_url = (os.getenv("SITE_URL") or "").strip().rstrip("/")
