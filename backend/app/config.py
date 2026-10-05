@@ -60,6 +60,12 @@ class Settings:
         self.openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com")
         self.openai_model = os.getenv("OPENAI_MODEL", "deepseek-chat")
         self.openai_timeout = int(os.getenv("OPENAI_TIMEOUT", "300"))
+        self.openai_reasoning_effort = os.getenv("OPENAI_REASONING_EFFORT", "").strip()
+        self.openai_thinking_type = os.getenv("OPENAI_THINKING_TYPE", "").strip().lower()
+        if self.openai_thinking_type not in {"", "enabled", "disabled"}:
+            raise ValueError("OPENAI_THINKING_TYPE 必须为空、enabled 或 disabled")
+        self.openai_reasoning_max_tokens = max(1, int(os.getenv("OPENAI_REASONING_MAX_TOKENS", "16384")))
+        self.openai_json_mode = os.getenv("OPENAI_JSON_MODE", "true").lower() not in {"false", "0", "no"}
         self.summary_max_input_chars = int(os.getenv("SUMMARY_MAX_INPUT_CHARS", "9000"))
         self.bili_rate_limit_seconds = float(os.getenv("BILI_RATE_LIMIT_SECONDS", "1.0"))
         self.site_url = (os.getenv("SITE_URL") or "").strip().rstrip("/")

@@ -139,7 +139,8 @@ def test_generation_merges_points_preserves_assignments_and_carries_history(coun
     value["knowledge_points"] = [dict(value["knowledge_points"][0], id=f"point-{index}") for index in range(count)]
     request = GenerateRequest(version=1, knowledge_point_ids=[p["id"] for p in value["knowledge_points"]], count=count)
     calls, responses = [], []
-    def chat(prompt, max_tokens, *, history):
+    def chat(prompt, max_tokens, *, history, json_mode):
+        assert json_mode is True
         calls.append({"prompt": prompt, "history": json.loads(json.dumps(history))})
         if len(calls) % 2 == 1:
             assignments = json.loads(prompt.splitlines()[2])
@@ -183,7 +184,7 @@ def test_generation_merges_points_preserves_assignments_and_carries_history(coun
 def test_structured_repair_sees_invalid_response_and_only_remembers_success():
     history = [{"role": "system", "content": service.RULES}]
     calls = []
-    def chat(prompt, max_tokens, *, history):
+    def chat(prompt, max_tokens, *, history, json_mode):
         calls.append((prompt, json.loads(json.dumps(history))))
         return "broken output" if len(calls) == 1 else '{"value": 42}'
     with patch.object(service, "_chat", side_effect=chat):
@@ -208,7 +209,7 @@ def test_later_batch_duplicate_is_repaired_using_previous_questions():
     last = [question(id="last", stem="新的第六题")]
     responses = [first, first, repeated, last, last]
     calls = []
-    def chat(prompt, max_tokens, *, history):
+    def chat(prompt, max_tokens, *, history, json_mode):
         calls.append((prompt, json.loads(json.dumps(history))))
         return json.dumps({"questions": responses[len(calls) - 1]}, ensure_ascii=False)
     with patch.object(service, "_chat", side_effect=chat):

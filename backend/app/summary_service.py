@@ -41,6 +41,16 @@ class SummaryConfigError(VideoProcessingError):
     """Raised when the LLM is not configured (e.g. missing API key)."""
 
 
+class LLMResponse(str):
+    """A string with completion metadata, so callers can reject truncation."""
+
+    def __new__(cls, content: str, finish_reason: str | None, max_tokens: int):
+        value = super().__new__(cls, content)
+        value.finish_reason = finish_reason
+        value.max_tokens = max_tokens
+        return value
+
+
 _client = None
 
 
@@ -272,34 +282,69 @@ def _chunk_span_seconds(chunk: str) -> int | None:
 
 # --- LLM calls ---
 
-def _chat(prompt: str, max_tokens: int = 1200, *, history: list[dict[str, str]] | None = None) -> str:
+def _chat(prompt: str, max_tokens: int = 1200, *, history: list[dict[str, str]] | None = None, json_mode: bool = False) -> str:
     messages = [dict(message) for message in (history or [])]
     messages.append({"role": "user", "content": prompt})
     client = _get_client()
+    # GLM-5.3 cannot disable thinking. Its default effort is max; use low for
+    # these extraction/generation tasks and reserve tokens for reasoning too.
+    glm_reasoning = settings.openai_model.lower().startswith("glm-5.3")
+    if glm_reasoning and settings.openai_thinking_type == "disabled":
+        raise SummaryConfigError("GLM-5.3 不支持关闭思考。请清空 OPENAI_THINKING_TYPE 并使用 OPENAI_REASONING_EFFORT=low，或换用支持非思考模式的模型。")
+    reasoning_effort = settings.openai_reasoning_effort or ("low" if glm_reasoning else "")
+    if glm_reasoning:
+        max_tokens = max(max_tokens, settings.openai_reasoning_max_tokens)
+    options = {}
+    if reasoning_effort:
+        options["extra_body"] = {"reasoning_effort": reasoning_effort}
+    if settings.openai_thinking_type:
+        options.setdefault("extra_body", {})["thinking"] = {"type": settings.openai_thinking_type}
+    text_only_models = getattr(client, "_video2any_text_only_models", set())
+    if json_mode and settings.openai_json_mode and settings.openai_model not in text_only_models:
+        options["response_format"] = {"type": "json_object"}
     # The OpenAI SDK appends "/chat/completions" to base_url; log the full URL
     # so a 404 (wrong OPENAI_BASE_URL / OPENAI_MODEL) is easy to diagnose.
     endpoint = str(client.base_url).rstrip("/") + "/chat/completions"
     request_id = uuid.uuid4().hex[:8]
     started = time.monotonic()
     logger.warning(
-        "LLM request [%s]: POST %s | model=%s | max_tokens=%d | prompt_chars=%d | history_messages=%d | read_timeout=%ss | max_retries=%s",
+        "LLM request [%s]: POST %s | model=%s | max_tokens=%d | prompt_chars=%d | history_messages=%d | read_timeout=%ss | max_retries=%s | reasoning_effort=%s | thinking=%s | json_mode=%s",
         request_id, endpoint, settings.openai_model, max_tokens,
         sum(len(message["content"]) for message in messages), len(messages) - 1,
-        settings.openai_timeout, client.max_retries,
+        settings.openai_timeout, client.max_retries, reasoning_effort or "default",
+        settings.openai_thinking_type or "default", "response_format" in options,
     )
     try:
-        resp = client.chat.completions.create(
-            model=settings.openai_model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0.3,
-        )
+        def complete():
+            return client.chat.completions.create(
+                model=settings.openai_model, messages=messages,
+                max_tokens=max_tokens, temperature=0.3, **options,
+            )
+        try:
+            resp = complete()
+        except Exception as exc:
+            message = str(exc).lower()
+            unsupported_format = (
+                getattr(exc, "status_code", None) in {400, 422}
+                and "response_format" in options
+                and ("response_format" in message or "json_object" in message)
+                and any(word in message for word in ("unsupported", "not support", "unknown", "unrecognized", "不支持"))
+            )
+            if not unsupported_format:
+                raise
+            logger.warning("LLM [%s]: JSON mode unsupported for model=%s; falling back to prompted JSON", request_id, settings.openai_model)
+            options.pop("response_format")
+            text_only_models.add(settings.openai_model)
+            client._video2any_text_only_models = text_only_models
+            resp = complete()
         content = resp.choices[0].message.content or ""
+        reasoning = getattr(resp.choices[0].message, "reasoning_content", None) or ""
         logger.warning(
-            "LLM response [%s]: model=%s | elapsed=%.1fs | output_chars=%d | finish_reason=%s",
-            request_id, settings.openai_model, time.monotonic() - started, len(content), resp.choices[0].finish_reason,
+            "LLM response [%s]: model=%s | elapsed=%.1fs | output_chars=%d | reasoning_chars=%d | completion_tokens=%s | finish_reason=%s",
+            request_id, settings.openai_model, time.monotonic() - started, len(content), len(reasoning),
+            getattr(resp.usage, "completion_tokens", None), resp.choices[0].finish_reason,
         )
-        return content
+        return LLMResponse(content, resp.choices[0].finish_reason, max_tokens)
     except Exception as exc:  # noqa: BLE001 - surface as a user-facing error
         logger.error(
             "LLM call FAILED [%s]: POST %s | model=%s | elapsed=%.1fs | error_type=%s | cause=%s | status=%s | %s",

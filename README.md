@@ -134,11 +134,28 @@ docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/video2any:l
 - `OPENAI_BASE_URL`：大模型 OpenAI 兼容接口地址，默认 `https://api.deepseek.com`。
 - `OPENAI_MODEL`：模型名，默认 `deepseek-chat`。
 - `OPENAI_TIMEOUT`：大模型响应读取等待超时（秒），默认 `300`；连接和连接池等待为 `10` 秒，发送请求为 `30` 秒。SDK 对超时、连接错误及部分 HTTP 错误最多自动重试 `2` 次，整个调用耗时可能超过此设置。
+- `OPENAI_REASONING_EFFORT`：可选思考深度。未配置时，`glm-5.3` 系列自动使用 `low`；其他模型保持服务商默认值。可按模型能力设为 `low`、`high`、`max`。
+- `OPENAI_THINKING_TYPE`：可选 `enabled` / `disabled`，空值保留服务商默认。仅用于支持该参数的模型。GLM-5.3 系列不能关闭思考，设置 `disabled` 时会提示改用 `low` 或切换模型。
+- `OPENAI_REASONING_MAX_TOKENS`：GLM-5.3 系列首次调用的输出 token 预算下限，默认 `16384`，为思考与正文共同预留空间；截断修正时最多提高到该值的两倍。预算是上限，实际使用量以响应 usage 为准。
+- `OPENAI_JSON_MODE`：练习题流程默认请求 `json_object` 输出；设为 `false` 可关闭。服务商明确拒绝 JSON 模式时自动回退，同一模型后续请求复用回退结果。
 - `SUMMARY_MAX_INPUT_CHARS`：总结分段时每段的字幕字符预算，默认 `9000`（越长越完整，但更慢更费 token）。
 
 出题及复核输出比普通视频总结长，默认给模型 `300` 秒的响应读取等待时间。已有 `.env` 如果写了 `OPENAI_TIMEOUT=60`，需改成 `OPENAI_TIMEOUT=300`；Compose 会优先使用 `.env` 中的显式值。执行 `docker compose up -d --force-recreate app` 应用配置，单纯 `restart` 不会更新环境变量。本地开发需修改启动进程的环境变量后重启。
 
 LLM 日志包含本次调用标识、读取超时、最大重试次数、总耗时和错误类型：`APITimeoutError` 表示超时，`status=429` 表示限流或额度问题，`status=5xx` 表示上游服务错误。`LLM output validation failed; regenerating once` 表示返回的 JSON / 题目结果不符合要求后重新生成，与网络重试不同；正常出题后的答案复核也会再调用一次模型。
+
+`finish_reason=length` 表示输出达到 token 上限，练习题流程不会接受该次结果；修正请求携带上次返回内容，提高 token 预算并要求压缩描述、重新输出完整 JSON，最多修正一次。日志还会显示 `reasoning_chars`、`completion_tokens`、`reasoning_effort` 和 `thinking`，便于区分思考耗时、正文输出与截断。知识点提炼失败后点击重试会复用已完成的转写。
+
+GLM-5.3-Flash 只能启用思考，可以用 `low` 降低深度；GLM-4.7 系列支持非思考模式，具体以[模型说明](https://docs.z.ai/guides/llm/glm-4.7)和[接口参数](https://docs.z.ai/api-reference/llm/chat-completion)为准。若希望使用 GLM-4.7-Flash 的非思考模式，可在包含这些配置的新版本中设置：
+
+```dotenv
+OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+OPENAI_MODEL=glm-4.7-flash
+OPENAI_THINKING_TYPE=disabled
+OPENAI_REASONING_EFFORT=
+```
+
+使用现有智谱 API Key，重新创建容器应用环境变量：`docker compose up -d --force-recreate app`。这些配置需要更新后的代码或镜像支持；单纯修改旧版本的 `.env` 不会添加请求参数。
 
 ## 运行时依赖
 

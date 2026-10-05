@@ -75,13 +75,12 @@ def validate_points(points, segments):
 def _structured(prompt, validate, max_tokens=5000, *, history=None):
     """One repair attempt, never accept plain prose or partial structured output."""
     original_prompt = prompt
-    working_history = [dict(message) for message in history] if history is not None else None
+    working_history = [dict(message) for message in history] if history is not None else [{"role": "system", "content": RULES}]
     for attempt in range(2):
-        if working_history is None:
-            content = _chat(RULES + prompt, max_tokens=max_tokens)
-        else:
-            content = _chat(prompt, max_tokens=max_tokens, history=working_history)
+        content = _chat(prompt, max_tokens=max_tokens, history=working_history, json_mode=True)
         try:
+            if getattr(content, "finish_reason", None) == "length":
+                raise ValueError(f"大模型输出达到 {content.max_tokens} token 上限被截断，JSON 未完整返回（finish_reason=length）")
             parsed = _extract_json_object(content)
             if parsed is None:
                 raise ValueError("返回内容不是有效 JSON 对象")
@@ -99,14 +98,17 @@ def _structured(prompt, validate, max_tokens=5000, *, history=None):
                 raise VideoProcessingError(f"大模型结果校验失败：{exc}") from exc
             logger.warning("LLM output validation failed; regenerating once (not a network retry): %s", exc)
             repair = f"上次输出不合要求：{exc}。重新完整输出正确 JSON，不要省略内容。"
-            if working_history is None:
-                prompt += "\n" + repair
-            else:
-                working_history.extend([
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": content},
-                ])
-                prompt = repair
+            if getattr(content, "finish_reason", None) == "length":
+                previous_limit = content.max_tokens
+                ceiling = settings.openai_reasoning_max_tokens * 2 if settings.openai_model.lower().startswith("glm-5.3") else 8192
+                max_tokens = max(previous_limit, min(previous_limit * 2, ceiling))
+                repair += "保持原请求要求及完整字段，压缩文字描述，避免冗长解释；重新输出完整对象，不要只续写剩余部分。"
+                logger.warning("LLM truncated output: increasing max_tokens from %d to %d for one repair", previous_limit, max_tokens)
+            working_history.extend([
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": content},
+            ])
+            prompt = repair
     raise AssertionError("unreachable")
 
 
@@ -147,6 +149,7 @@ def extract_knowledge(segments, job):
         prompt = f"""提炼下面讲课原文的知识点，不提取闲聊。每点写清概念、条件、步骤及明确讲出的公式。
 原文每行开头给出片段编号和时间。segment_ids 只能引用本段出现的编号。
 返回 {{"knowledge_points":[{{"id":"临时编号","title":"名称","detail":"讲解","formulas":"公式或空字符串","segment_ids":[0]}}]}}。
+合并相近概念，讲解简洁，避免逐句复述原文；公式只保留原文明确讲出的内容。
 若没有讲课知识可返回空列表。
 原文：\n{chunk}"""
 
