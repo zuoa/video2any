@@ -1,24 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, FileText, Loader2, RefreshCw, Upload } from "lucide-react";
-import { ToolHeader, SiteFooter, apiUrl, parseBilibiliInput, triggerDownload } from "./App";
+import { FileText, Loader2, RefreshCw, Upload } from "lucide-react";
+import { ToolHeader, SiteFooter, apiUrl, parseBilibiliInput } from "./App";
 import type { AppPage } from "./App";
-import type { BilibiliPagesResponse, ExportResponse, VideoInfo } from "./types";
+import type { BilibiliPagesResponse, VideoInfo } from "./types";
 import { MathMarkdown } from "./MathMarkdown";
+import ExerciseHistory from "./ExerciseHistory";
+import { difficultyLabels, exercisePageHref, typeLabels } from "./exerciseTypes";
+import type { Difficulty, Point, QType, Question, SavedExercisePage } from "./exerciseTypes";
 import "./exercises.css";
 
-type QType = "single_choice" | "fill_blank" | "short_answer" | "calculation";
-type Difficulty = "basic" | "practice" | "advanced";
 type ASRBackend = "sensevoice" | "qwen3" | "whisper";
 type ASROptions = { default_backend: ASRBackend; backends: { id: ASRBackend; label: string; description: string }[] };
 type Segment = { start: number; end: number; text: string };
-type Point = { id: string; title: string; detail: string; formulas: string; segment_ids: number[] };
-type Question = { id: string; type: QType; difficulty: Difficulty; stem: string; options: string[]; answer: string; explanation: string; knowledge_point_ids: string[] };
-type Batch = { id: string; version: number; created_at: number; questions: Question[] };
+type Batch = { id: string; version: number; created_at: number; questions: Question[]; knowledge_points?: Point[]; page_slug?: string };
 type Lesson = { id: string; video_id: string; title: string; version: number; duration: number; asr_backend?: ASRBackend; segments: Segment[]; knowledge_points: Point[]; batches: Batch[]; latest_job_id: string | null; source: { type: string; bv: string | null; page: number | null } };
 type Job = { id: string; lesson_id: string; kind: "prepare" | "generate"; status: "queued" | "running" | "succeeded" | "failed"; stage: string; progress: number; error: string | null; request: Record<string, unknown> | null };
 type Task = { lesson_id: string; job_id: string | null };
-const typeLabels: Record<QType, string> = { single_choice: "单选题", fill_blank: "填空题", short_answer: "简答题", calculation: "计算题" };
-const difficultyLabels: Record<Difficulty, string> = { basic: "基础", practice: "巩固", advanced: "提高" };
 const stages: Record<string, string> = { queued: "等待处理", waiting_for_transcription: "等待语音识别", loading_model: "加载语音模型（首次使用需要下载）", extracting_audio: "提取视频音轨", detecting_speech: "检测语音片段", transcribing: "识别讲课语音", extracting_knowledge: "提炼知识点", generating_questions: "生成并复核练习题", done: "处理完成", interrupted: "任务已中断" };
 
 async function request<T>(path: string, body?: unknown, method = "POST", signal?: AbortSignal): Promise<T> {
@@ -38,6 +35,11 @@ function time(seconds: number): string {
 }
 function toggle(values: string[], id: string): string[] {
   return values.includes(id) ? values.filter(value => value !== id) : [...values, id];
+}
+function batchTitle(lesson: Lesson, batch?: Batch): string {
+  const used = new Set(batch?.questions.flatMap(q => q.knowledge_point_ids) ?? []);
+  const topic = (batch?.knowledge_points ?? lesson.knowledge_points).filter(p => used.has(p.id)).map(p => p.title).slice(0, 3).join("、") || lesson.title.replace(/\.[^.]+$/, "");
+  return `${topic} 知识练习`.slice(0, 120);
 }
 
 export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPage) => void }) {
@@ -86,7 +88,7 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
     setChosenPoints(value.knowledge_points.map(p => p.id));
     const latest = value.batches[value.batches.length - 1];
     setBatchId(latest?.id ?? ""); setSelected(latest?.questions.map(q => q.id) ?? []);
-    setTitle(`${value.title.replace(/\.[^.]+$/, "").slice(0, 90)} 知识练习`);
+    setTitle(batchTitle(value, latest));
   }
   useEffect(() => {
     if (!lessonId) return;
@@ -201,9 +203,12 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
     if (!lesson) return;
     await run(async () => acceptTask(await request<Task>("/api/exercises/prepare", { video_id: lesson.video_id })));
   }
-  async function download(kind: "worksheet" | "answers") {
+  async function savePage() {
     if (!lesson || !batch) return;
-    await run(async () => triggerDownload(await request<ExportResponse>(`/api/exercises/${lesson.id}/export`, { batch_id: batch.id, question_ids: selected, title: title.trim(), kind })));
+    await run(async () => {
+      const saved = await request<SavedExercisePage>(`/api/exercises/${lesson.id}/pages`, { batch_id: batch.id, question_ids: selected, title: title.trim() });
+      window.location.hash = exercisePageHref(saved.slug);
+    });
   }
   function jump(segmentId: number) {
     const start = segments[segmentId]?.start;
@@ -211,7 +216,8 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
   }
 
   return <main className="app-shell exercise-shell">
-    <ToolHeader currentPage="exercises" title="讲课视频转练习题" subtitle="提炼知识点，选题组卷，下载可打印 Word" icon={<FileText size={24} />} navigateTo={navigateTo} />
+    <ToolHeader currentPage="exercises" title="讲课视频转练习题" subtitle="提炼知识点，保存试题页面，随时回看与打印" icon={<FileText size={24} />} navigateTo={navigateTo} />
+    <ExerciseHistory revision={lesson?.batches.map(b => b.id).join(",") ?? ""} />
     <section className="exercise-panel">
       <h2>1. 导入讲课视频</h2>
       <p className="exercise-note">当前语音识别模型：{selectedModel?.label ?? "读取配置中…"}{selectedModel ? ` · ${selectedModel.description}` : ""}</p>
@@ -257,12 +263,13 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
         {chosenPoints.length > count ? <p className="exercise-note">题数少于知识点数，本批会从所选范围均匀取点出题；增加题数可覆盖更多知识点。</p> : null}
       </section>
       {lesson.batches.length ? <section className="exercise-panel">
-        <h2>4. 预览选题，下载 Word</h2>
-        <label>题目批次<select disabled={busy} value={batchId} onChange={event => { const value = lesson.batches.find(b => b.id === event.target.value); setBatchId(event.target.value); setSelected(value?.questions.map(q => q.id) ?? []); }}>{lesson.batches.map((value, index) => <option key={value.id} value={value.id}>第 {index + 1} 批 · 内容版本 {value.version} · {value.questions.length} 题</option>)}</select></label>
+        <h2>4. 预览选题，打开打印页面</h2>
+        <label>题目批次<select disabled={busy} value={batchId} onChange={event => { const value = lesson.batches.find(b => b.id === event.target.value); setBatchId(event.target.value); setSelected(value?.questions.map(q => q.id) ?? []); setTitle(batchTitle(lesson, value)); }}>{lesson.batches.map((value, index) => <option key={value.id} value={value.id}>第 {index + 1} 批 · 内容版本 {value.version} · {value.questions.length} 题</option>)}</select></label>
         {batch && batch.version !== lesson.version ? <p className="exercise-note">此批题目基于内容版本 {batch.version}。当前内容已更新，可重新生成一批题目。</p> : null}
+        {batch?.page_slug ? <p className="exercise-saved-link">本批试题已自动保存：<a href={exercisePageHref(batch.page_slug)}>查看完整试题与打印 →</a><span className="exercise-history-slug">{batch.page_slug}</span></p> : null}
         <div className="exercise-row"><button disabled={busy} onClick={() => setSelected(batch?.questions.map(q => q.id) ?? [])}>全选</button><button disabled={busy} onClick={() => setSelected([])}>清空选择</button><strong>已选 {selected.length} 题</strong></div>
         <div className="exercise-questions">{batch?.questions.map((question, index) => <article key={question.id} className="exercise-question"><label className="exercise-point-heading"><input type="checkbox" disabled={busy} checked={selected.includes(question.id)} onChange={() => setSelected(values => toggle(values, question.id))} /><strong>第 {index + 1} 题</strong><span>{typeLabels[question.type]} · {difficultyLabels[question.difficulty]}</span></label><MathMarkdown text={question.stem} />{question.options.map((option, i) => <div className="exercise-option" key={i}><strong>{String.fromCharCode(65 + i)}.</strong><MathMarkdown text={option} /></div>)}<details><summary>查看答案与解析</summary><h4>答案</h4><MathMarkdown text={question.answer} /><h4>解析</h4><MathMarkdown text={question.explanation} /></details></article>)}</div>
-        <div className="exercise-export"><label>练习卷标题<input maxLength={120} disabled={busy} value={title} onChange={event => setTitle(event.target.value)} /></label><div className="exercise-row"><button disabled={busy || !selected.length || !title.trim()} onClick={() => void download("worksheet")}><Download size={17} /> 下载练习卷 Word</button><button disabled={busy || !selected.length || !title.trim()} onClick={() => void download("answers")}><Download size={17} /> 下载答案解析 Word</button></div><p className="exercise-note">A4 黑白排版，练习卷留答题空间。两份文件按所选题目重新连续编号，公式可在 Word 中编辑。</p></div>
+        <div className="exercise-export"><label>练习卷标题<input maxLength={120} disabled={busy} value={title} onChange={event => setTitle(event.target.value)} /></label><div className="exercise-row"><button disabled={busy || !selected.length || !title.trim()} onClick={() => void savePage()}><FileText size={17} />保存所选题目并打开页面</button></div><p className="exercise-note">页面地址使用知识点拼音，同名页面按序号区分。保存后可分别查看、打印练习卷和答案解析。</p></div>
       </section> : null}
     </> : null}
     <SiteFooter currentPage="exercises" navigateTo={navigateTo} />

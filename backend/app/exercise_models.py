@@ -83,8 +83,11 @@ class GenerateRequest(StrictModel):
     count: int = Field(default=10, ge=1, le=30)
 
 
-class ExportExercisesRequest(StrictModel):
+class SaveExercisePageRequest(StrictModel):
     batch_id: str = Field(min_length=1, max_length=64)
     question_ids: list[str] = Field(min_length=1, max_length=30)
     title: str = Field(min_length=1, max_length=120)
+
+
+class ExportExercisesRequest(SaveExercisePageRequest):
     kind: Literal["worksheet", "answers"]

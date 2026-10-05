@@ -41,6 +41,8 @@ import type {
 } from "./types";
 
 const ExercisePage = lazy(() => import("./ExercisePage"));
+const ExercisePaperPage = lazy(() => import("./ExercisePaperPage"));
+const ExerciseHistory = lazy(() => import("./ExerciseHistory"));
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -92,7 +94,8 @@ export type AppPage = "home" | "gif" | "audio" | "summary" | "exercises";
 type NavigateTo = (page: AppPage) => void;
 type BilibiliBusy = "pages" | "download";
 type SummaryResultRoute = { name: "summary-result"; bv: string; page: number };
-type Route = AppPage | SummaryResultRoute;
+type ExercisePaperRoute = { name: "exercise-paper"; slug: string };
+type Route = AppPage | SummaryResultRoute | ExercisePaperRoute;
 
 interface BilibiliDownloadContext {
   bv: string;
@@ -130,7 +133,12 @@ function routeFromHash(): Route {
     }
     return "summary";
   }
-  if (segments[0] === "exercises") return "exercises";
+  if (segments[0] === "exercises") {
+    if (segments[1] === "papers" && segments[2]) {
+      return { name: "exercise-paper", slug: segments[2] };
+    }
+    return "exercises";
+  }
   if (segments[0] === "gif") {
     return "gif";
   }
@@ -661,11 +669,12 @@ function HomePage({ navigateTo }: { navigateTo: NavigateTo }) {
           <button className="tool-card" type="button" onClick={() => navigateTo("exercises")}>
             <span className="tool-card-icon"><FileText size={30} /></span>
             <span className="tool-card-title">讲课视频转练习题</span>
-            <span className="tool-card-copy">语音识别、知识点提炼、选题导出 Word</span>
+            <span className="tool-card-copy">知识点提炼、试题历史、网页打印</span>
             <span className="tool-card-action">进入</span>
           </button>
         </div>
       </section>
+      <Suspense fallback={null}><ExerciseHistory compact /></Suspense>
       <SiteFooter currentPage="home" navigateTo={navigateTo} />
     </main>
   );
@@ -2956,9 +2965,9 @@ export function App() {
     setRoute({ name: "summary-result", bv, page });
   }, []);
 
-  // The only object route is summary-result, which still highlights the 总结 tab.
-  const currentPage: AppPage = typeof route === "string" ? route : "summary";
-
+  if (typeof route === "object" && route.name === "exercise-paper") {
+    return <Suspense fallback={<main className="app-shell">正在加载试题页面…</main>}><ExercisePaperPage key={route.slug} slug={route.slug} navigateTo={navigateTo} /></Suspense>;
+  }
   if (typeof route === "object" && route.name === "summary-result") {
     return (
       <SummaryResultPage

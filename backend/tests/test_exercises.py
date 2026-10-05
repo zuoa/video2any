@@ -6,6 +6,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -15,7 +16,7 @@ from pydantic import ValidationError
 from backend.app.config import settings
 from backend.app import exercise_service as service, exercise_store as store, exercise_export as exporter, storage
 from backend.app import asr_service
-from backend.app.exercise_models import GenerateRequest, LessonPatch, Question, ExportExercisesRequest
+from backend.app.exercise_models import GenerateRequest, LessonPatch, Question, ExportExercisesRequest, SaveExercisePageRequest
 from backend.app.exercise_routes import router
 from backend.app.ffmpeg_tools import VideoProcessingError
 
@@ -125,6 +126,110 @@ def test_generation_review_keeps_requested_count_and_snapshot():
     assert len(batch["questions"]) == 2
     assert batch["knowledge_points"] == saved["knowledge_points"]
     assert len({q["id"] for q in batch["questions"]}) == 2
+    page = store.page(batch["page_slug"])
+    assert page["slug"] == "er-ci-fang-cheng"
+    assert page["questions"] == batch["questions"]
+    assert store.recent_pages()["total"] == 1
+
+
+def saved_batch(value, batch_id="batch", created_at=100):
+    batch = {"id": batch_id, "version": value["version"], "created_at": created_at,
+             "knowledge_points": json.loads(json.dumps(value["knowledge_points"])),
+             "questions": [question(id=f"{batch_id}-q1"), question(id=f"{batch_id}-q2", stem="求解 $x^2=9$。") ]}
+    value["batches"].append(batch)
+    store.save_lesson(value)
+    return batch
+
+
+def test_pages_use_pinyin_collisions_and_paginated_recent_history():
+    value = lesson()
+    first = saved_batch(value, "first", 100)
+    second = saved_batch(value, "second", 200)
+    assert first["page_slug"] == "er-ci-fang-cheng"
+    assert second["page_slug"] == "er-ci-fang-cheng-2"
+    recent = store.recent_pages(limit=1)
+    assert recent["total"] == 2
+    assert recent["items"][0]["slug"] == second["page_slug"]
+    assert "questions" not in recent["items"][0]
+    assert store.recent_pages(limit=1, offset=1)["items"][0]["slug"] == first["page_slug"]
+    assert store.recent_pages(offset=2)["items"] == []
+
+
+def test_saved_pages_survive_lesson_changes_restart_and_missing_video():
+    value = lesson()
+    batch = saved_batch(value)
+    original = store.page(batch["page_slug"])
+    value["knowledge_points"][0]["title"] = "新的知识点名称"
+    value["batches"][0]["questions"][0]["stem"] = "更改后的内容"
+    value["version"] = 2
+    store.save_lesson(value)
+    service.stop()
+    service.start()
+    assert store.page(batch["page_slug"]) == original
+    assert store.recent_pages()["total"] == 1
+    assert not (settings.uploads_dir / value["video_id"]).exists()
+
+
+def test_save_selected_page_is_idempotent_and_keeps_batch_order():
+    value = lesson()
+    batch = saved_batch(value)
+    request = SaveExercisePageRequest(batch_id=batch["id"], question_ids=["batch-q2", "batch-q1"], title="数学练习")
+    first = store.create_page(value["id"], request)
+    assert [q["id"] for q in first["questions"]] == ["batch-q1", "batch-q2"]
+    assert store.create_page(value["id"], request) == first
+    selected = store.create_page(value["id"], request.model_copy(update={"question_ids": ["batch-q2"]}))
+    assert selected["question_count"] == 1
+    assert selected["questions"][0]["id"] == "batch-q2"
+    assert selected["slug"] != first["slug"]
+    assert store.recent_pages()["total"] == 3
+
+
+def test_simultaneous_page_saves_allocate_stable_unique_slugs():
+    value = lesson()
+    saved_batch(value)
+    requests = [SaveExercisePageRequest(batch_id="batch", question_ids=["batch-q1"], title=f"练习 {i}") for i in range(6)]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        pages = list(pool.map(lambda request: store.create_page(value["id"], request), requests))
+    assert len({p["slug"] for p in pages}) == 6
+    assert store.recent_pages()["total"] == 7
+    assert store.create_page(value["id"], requests[0])["slug"] == pages[0]["slug"]
+
+
+def test_startup_backfills_legacy_batches_once_using_their_knowledge_snapshot():
+    value = lesson()
+    saved_batch(value)
+    value["knowledge_points"][0]["title"] = "新的课程名称"
+    value["batches"][0].pop("page_slug")
+    # Simulate the database before printable pages existed.
+    with store.connect() as conn:
+        conn.execute("DROP TABLE pages")
+        conn.execute("UPDATE lessons SET payload=? WHERE id=?", (json.dumps(value), value["id"]))
+    store.init_db()
+    batch = store.lesson(value["id"])["batches"][0]
+    assert batch["page_slug"] == "er-ci-fang-cheng"
+    assert store.page(batch["page_slug"])["knowledge_points"][0]["title"] == "二次方程"
+    store.init_db()
+    assert store.recent_pages()["total"] == 1
+
+
+def test_page_routes_validate_selection_and_static_routes_precede_lesson_ids():
+    value = lesson()
+    batch = saved_batch(value)
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    assert client.get("/api/exercises/pages").json()["total"] == 1
+    assert client.get(f"/api/exercises/pages/{batch['page_slug']}").json()["question_count"] == 2
+    assert client.get("/api/exercises/pages/missing").status_code == 404
+    assert client.get("/api/exercises/pages?limit=101").status_code == 422
+    assert client.get("/api/exercises/pages?offset=-1").status_code == 422
+    body = {"batch_id": "batch", "question_ids": ["batch-q1"], "title": "打印测试"}
+    assert client.post("/api/exercises/lesson/pages", json=body).status_code == 200
+    for ids in (["missing"], ["batch-q1", "batch-q1"]):
+        assert client.post("/api/exercises/lesson/pages", json={**body, "question_ids": ids}).status_code == 400
+    for updates in ({"title": " "}, {"question_ids": []}):
+        assert client.post("/api/exercises/lesson/pages", json={**body, **updates}).status_code == 422
+    assert client.post("/api/exercises/lesson/pages", json={**body, "batch_id": "missing"}).status_code == 404
 
 
 def test_duplicate_generation_requests_reuse_active_task_and_block_edit():

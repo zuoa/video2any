@@ -61,3 +61,48 @@
 .exercise-panel input[type=checkbox] { min-height: 18px; padding: 0; flex-shrink: 0; }
 .exercise-export { position: static; }
 @media (max-width: 700px) { .exercise-shell .tool-nav button { padding: 0 4px; gap: 4px; font-size: 11px; } }
+
+.exercise-history-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.exercise-history-list li { min-width: 0; padding: 16px; border: 1px solid var(--line); background: #fffbf0; }
+.exercise-history a, .exercise-saved-link a, .exercise-paper-toolbar a { color: var(--teal-dark); overflow-wrap: anywhere; }
+.exercise-history-list a { display: block; text-decoration: none; }
+.exercise-history-list a:hover strong { text-decoration: underline; }
+.exercise-history-list p { margin: 8px 0 0; font-size: 13px; }
+.exercise-history-slug { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+.exercise-history-more { display: inline-block; margin-top: 16px; }
+.exercise-paper-address { display: flex !important; gap: 12px; }
+.exercise-paper-address input { flex: 1; min-width: 0; }
+.exercise-paper-toolbar button[aria-pressed=true], .exercise-paper-toolbar .exercise-print-button { background: var(--teal); color: #fff; }
+.exercise-paper { box-sizing: border-box; max-width: 210mm; width: calc(100% - 36px); margin: 28px auto; padding: 18mm; background: white; color: #161616; border: 1px solid #d8d8d8; box-shadow: 0 4px 20px #00000010; font-family: "Noto Serif CJK SC", "Songti SC", "SimSun", serif; }
+.exercise-paper-heading { text-align: center; border-bottom: 1px solid #444; padding-bottom: 14px; margin-bottom: 22px; }
+.exercise-paper-heading h1 { font-size: 24px; line-height: 1.5; margin: 0 0 16px; overflow-wrap: anywhere; }
+.exercise-paper-heading h2 { font-size: 18px; margin: 0 0 14px; }
+.exercise-paper-heading p { font-size: 12px; color: #444; line-height: 1.7; }
+.exercise-paper-student { font-size: 13px; line-height: 2; }
+.exercise-paper-question { margin: 0 0 26px; overflow-wrap: anywhere; }
+.exercise-paper-question h3 { font-size: 16px; margin: 0 0 10px; }
+.exercise-paper-question h3 span { font-weight: normal; font-size: 12px; margin-left: 12px; }
+.exercise-paper-question h4 { font-size: 14px; margin: 14px 0 4px; }
+.exercise-paper .math-markdown { font-size: 14px; }
+.exercise-paper-solution { padding-top: 4px; }
+.exercise-answer-space { height: 35mm; }
+.exercise-answer-space-calculation { height: 48mm; }
+@media (max-width: 700px) {
+  .exercise-history-list { grid-template-columns: 1fr; }
+  .exercise-paper { width: calc(100% - 24px); padding: 20px; }
+  .exercise-paper-heading h1 { font-size: 21px; }
+  .exercise-paper-student { line-height: 2.5; }
+}
+@page { size: A4; margin: 16mm; }
+@media print {
+  html, body, #root, .exercise-paper-shell { width: auto; min-width: 0; margin: 0; padding: 0; background: white; color: black; }
+  .exercise-no-print { display: none !important; }
+  .exercise-paper { max-width: none; width: 100%; margin: 0; padding: 0; border: 0; box-shadow: none; font-size: 11pt; }
+  .exercise-paper .math-markdown { font-size: 11pt; }
+  .exercise-paper-heading { break-inside: avoid; }
+  .exercise-paper-question { break-inside: avoid; page-break-inside: avoid; }
+  .exercise-paper-question h3, .exercise-paper-question h4 { break-after: avoid; }
+  .exercise-paper p { orphans: 3; widows: 3; }
+  .exercise-paper a { color: black; text-decoration: none; }
+  .exercise-paper .math-markdown .katex-display { overflow: visible; }
+}
