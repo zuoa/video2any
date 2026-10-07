@@ -95,6 +95,8 @@ npm run dev
 
 前端开发服务默认代理 `/api` 到 `http://127.0.0.1:8000`。
 
+前端使用 React + TypeScript + Vite，UI 组件库为 Radix UI Themes。全局主题在 `frontend/src/main.tsx` 配置，品牌色和组件样式在 `frontend/src/ui.css`；表单、按钮、弹窗和进度条统一使用 Radix 组件。`UploadField` 封装视频选择与拖拽上传，`FieldSelect` 封装下拉菜单，`RangeInput` 使用 Radix Slider 处理拖动与键盘操作。
+
 ## GitHub Actions 镜像
 
 `.github/workflows/docker.yml` 会在以下场景构建镜像：

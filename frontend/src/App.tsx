@@ -1,3 +1,4 @@
+import { Button, Dialog, Progress, SegmentedControl, Switch, TextArea, TextField } from "@radix-ui/themes";
 import {
   AlertCircle,
   ArrowRight,
@@ -7,7 +8,7 @@ import {
   Film,
   FileText,
   FolderUp,
-  Home,
+  AudioLines,
   Image as ImageIcon,
   Loader2,
   MousePointer2,
@@ -17,14 +18,18 @@ import {
   RefreshCw,
   Repeat,
   Scissors,
+  SlidersHorizontal,
   SkipBack,
   Sparkles,
   Type,
   Upload,
   Video
 } from "lucide-react";
-import html2canvas from "html2canvas-pro";
-import { toDataURL as renderQrDataUrl } from "qrcode";
+import { Footer, SiteNavigation } from "./components/SiteChrome";
+import HomePage, { LittleCharacter } from "./components/HomePage";
+import { UploadField } from "./components/UploadField";
+import { RangeInput } from "./components/RangeInput";
+import { FieldSelect } from "./components/FieldSelect";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, Ref } from "react";
 import type {
@@ -42,7 +47,6 @@ import type {
 
 const ExercisePage = lazy(() => import("./ExercisePage"));
 const ExercisePaperPage = lazy(() => import("./ExercisePaperPage"));
-const ExerciseHistory = lazy(() => import("./ExerciseHistory"));
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -389,67 +393,23 @@ interface ToolHeaderProps {
   navigateTo: NavigateTo;
 }
 
-function ToolNav({ currentPage, navigateTo }: { currentPage: AppPage; navigateTo: NavigateTo }) {
-  return (
-    <nav className="tool-nav" aria-label="工具导航">
-      <button className={currentPage === "home" ? "active" : ""} type="button" onClick={() => navigateTo("home")}>
-        <Home size={16} />
-        主页
-      </button>
-      <button className={currentPage === "gif" ? "active" : ""} type="button" onClick={() => navigateTo("gif")}>
-        <Film size={16} />
-        GIF
-      </button>
-      <button className={currentPage === "audio" ? "active" : ""} type="button" onClick={() => navigateTo("audio")}>
-        <Music size={16} />
-        音频
-      </button>
-      <button className={currentPage === "summary" ? "active" : ""} type="button" onClick={() => navigateTo("summary")}>
-        <FileText size={16} />
-        总结
-      </button>
-      <button className={currentPage === "exercises" ? "active" : ""} type="button" onClick={() => navigateTo("exercises")}>
-        <FileText size={16} />练习题
-      </button>
-    </nav>
-  );
-}
-
 export function ToolHeader({ currentPage, title, subtitle, icon, actions, navigateTo }: ToolHeaderProps) {
   return (
     <header className="topbar">
-      <div className="brandline">
-        <button className="brand-home" type="button" onClick={() => navigateTo("home")} aria-label="回到主页">
-          <Video size={20} />
-        </button>
-        <div className="brand-copy">
-          <div className="tool-title-row">
-            {icon}
-            <h1>{title}</h1>
-          </div>
-          <p>{subtitle}</p>
+      <SiteNavigation currentPage={currentPage} navigateTo={navigateTo} />
+      <div className="page-heading">
+        <div className="page-heading-copy">
+          <div className={`page-tool-icon page-tool-icon-${currentPage}`}>{icon}</div>
+          <div><span className="section-eyebrow">视频小工坊 / {currentPage === "gif" ? "GIF MAKER" : currentPage === "audio" ? "AUDIO EXTRACTOR" : currentPage === "exercises" ? "LESSON TO PRACTICE" : "VIDEO NOTES"}</span><h1>{title}</h1><p>{subtitle}</p></div>
         </div>
+        {actions ? <div className="topbar-actions">{actions}</div> : null}
       </div>
-      <ToolNav currentPage={currentPage} navigateTo={navigateTo} />
-      {actions ? <div className="topbar-actions">{actions}</div> : null}
     </header>
   );
 }
 
 export function SiteFooter({ currentPage, navigateTo }: { currentPage: AppPage; navigateTo: NavigateTo }) {
-  return (
-    <footer className="site-footer">
-      <div className="footer-brand">
-        <span className="footer-mark">V2A</span>
-        <div>
-          <strong>Video to Any</strong>
-          <span>智能视频创作引擎</span>
-        </div>
-      </div>
-      <ToolNav currentPage={currentPage} navigateTo={navigateTo} />
-      <div className="footer-meta">MADE BY ZUOAJ</div>
-    </footer>
-  );
+  return <Footer currentPage={currentPage} navigateTo={navigateTo} />;
 }
 
 function useBilibiliSource({
@@ -624,64 +584,9 @@ function useBilibiliSource({
   };
 }
 
-function HomePage({ navigateTo }: { navigateTo: NavigateTo }) {
-  return (
-    <main className="app-shell home-shell">
-      <ToolHeader
-        currentPage="home"
-        title="Video to Any"
-        subtitle="选择一个视频工具，进入独立工作台"
-        icon={<Video size={24} />}
-        navigateTo={navigateTo}
-      />
-
-      <section className="home-board">
-        <div className="home-hero">
-          <div className="pixel-badge">VIDEO TO ANY</div>
-          <h2>选择工具</h2>
-          <p>每个工具独立处理任务，共用同一套导航、缓存和输出。</p>
-        </div>
-        <div className="tool-grid">
-          <button className="tool-card" type="button" onClick={() => navigateTo("gif")}>
-            <span className="tool-card-icon">
-              <Film size={30} />
-            </span>
-            <span className="tool-card-title">视频转 GIF</span>
-            <span className="tool-card-copy">裁剪、字幕、变速、循环</span>
-            <span className="tool-card-action">进入</span>
-          </button>
-          <button className="tool-card" type="button" onClick={() => navigateTo("audio")}>
-            <span className="tool-card-icon">
-              <Music size={30} />
-            </span>
-            <span className="tool-card-title">BV 提取音频</span>
-            <span className="tool-card-copy">下载、试听、按时间点导出</span>
-            <span className="tool-card-action">进入</span>
-          </button>
-          <button className="tool-card" type="button" onClick={() => navigateTo("summary")}>
-            <span className="tool-card-icon">
-              <FileText size={30} />
-            </span>
-            <span className="tool-card-title">BV 视频总结</span>
-            <span className="tool-card-copy">整体总结、关键时间点、金句提炼</span>
-            <span className="tool-card-action">进入</span>
-          </button>
-          <button className="tool-card" type="button" onClick={() => navigateTo("exercises")}>
-            <span className="tool-card-icon"><FileText size={30} /></span>
-            <span className="tool-card-title">讲课视频转练习题</span>
-            <span className="tool-card-copy">知识点提炼、试题历史、网页打印</span>
-            <span className="tool-card-action">进入</span>
-          </button>
-        </div>
-      </section>
-      <Suspense fallback={null}><ExerciseHistory compact /></Suspense>
-      <SiteFooter currentPage="home" navigateTo={navigateTo} />
-    </main>
-  );
-}
-
 function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [crop, setCrop] = useState<CropRect | null>(null);
   const [startTime, setStartTime] = useState(0);
   const [clipDuration, setClipDuration] = useState(3);
@@ -1218,49 +1123,39 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
   };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell gif-shell">
       <style>{fontFaceStyles}</style>
       <ToolHeader
         currentPage="gif"
         title="视频转 GIF"
-        subtitle={videoInfo ? `${videoInfo.filename} · ${videoInfo.width}x${videoInfo.height}` : "制作 GIF 表情"}
+        subtitle={videoInfo ? `${videoInfo.filename} · ${videoInfo.width} × ${videoInfo.height}` : "截取喜欢的瞬间，加点文字，做成你的专属表情包。"}
         icon={<Film size={24} />}
         navigateTo={navigateTo}
         actions={
-          <button className="primary-button" disabled={!canExport} onClick={exportGif}>
+          <Button className="primary-button" disabled={!canExport} onClick={exportGif}>
             {busy === "export" ? <Loader2 className="spin" size={18} /> : <Download size={18} />}
             导出 GIF
-          </button>
+          </Button>
         }
       />
 
       <section className="workbench">
-        <aside className="control-panel">
+        <div className="settings-panel">
+          <div className="settings-heading"><span><SlidersHorizontal size={15} />制作设置</span><span>向下滚动，查看全部设置</span></div>
+        <aside className="control-panel" aria-label="GIF 制作设置" tabIndex={0}>
           <section className="panel-section">
             <div className="section-title">
               <Upload size={18} />
-              <h2>视频源</h2>
+              <h2>导入视频</h2>
             </div>
-            <input
-              ref={fileInputRef}
-              className="file-input"
-              type="file"
-              accept="video/*"
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) {
-                  void loadUploadedFile(file);
-                }
-              }}
-            />
-            <button className="wide-button" type="button" disabled={Boolean(busy)} onClick={() => fileInputRef.current?.click()}>
-              {busy === "upload" ? <Loader2 className="spin" size={17} /> : <Video size={17} />}
-              上传视频
-            </button>
+            <UploadField compact inputRef={fileInputRef} label="上传视频"
+              hint="点击选择，或把视频拖到这里" disabled={Boolean(busy)}
+              busy={busy === "upload"} onSelect={loadUploadedFile} />
             <div className="bv-row">
-              <input
+              <TextField.Root
                 value={bilibiliSource.bv}
-                placeholder="BV1... 或 bilibili 视频 URL"
+                aria-label="Bilibili 视频链接或 BV 号"
+                placeholder="粘贴 B 站视频链接或 BV 号"
                 onChange={(event) => bilibiliSource.updateInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -1268,7 +1163,7 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
                   }
                 }}
               />
-              <button
+              <Button
                 type="button"
                 disabled={!bilibiliSource.canUse}
                 onClick={() => void bilibiliSource.refreshPages()}
@@ -1276,25 +1171,17 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
               >
                 {busy === "pages" ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
                 识别
-              </button>
+              </Button>
             </div>
             {bilibiliSource.availablePages.length > 1 ? (
               <label>
                 分 P
-                <select
-                  value={bilibiliSource.page}
-                  disabled={Boolean(busy)}
-                  onChange={(event) => bilibiliSource.selectPage(Number(event.target.value))}
-                >
-                  {bilibiliSource.availablePages.map((page) => (
-                    <option key={page.page} value={page.page}>
-                      {formatBilibiliPageOption(page)}
-                    </option>
-                  ))}
-                </select>
+                <FieldSelect label="分 P" value={bilibiliSource.page} disabled={Boolean(busy)}
+                  onValueChange={value => bilibiliSource.selectPage(Number(value))}
+                  options={bilibiliSource.availablePages.map(page => ({ value: page.page, label: formatBilibiliPageOption(page) }))} />
               </label>
             ) : null}
-            <button
+            <Button
               className="wide-button secondary"
               type="button"
               disabled={!bilibiliSource.canUse}
@@ -1302,7 +1189,7 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
             >
               {busy === "download" ? <Loader2 className="spin" size={17} /> : <Download size={17} />}
               {bilibiliSource.availablePages.length > 1 ? "下载所选分 P" : "下载 BV 视频"}
-            </button>
+            </Button>
             {videoInfo ? (
               <div className="metric source-metric">
                 已载入 {videoInfo.filename} · {formatTimeInput(videoInfo.duration)} · {videoInfo.width}x{videoInfo.height}
@@ -1314,12 +1201,12 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
           <section className="panel-section">
             <div className="section-title">
               <Scissors size={18} />
-              <h2>片段</h2>
+              <h2>选择片段</h2>
             </div>
             <div className="field-grid two">
               <label>
                 开始
-                <input
+                <TextField.Root
                   className="time-input"
                   type="text"
                   placeholder="0:00"
@@ -1337,7 +1224,7 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
               </label>
               <label>
                 持续秒数
-                <input
+                <TextField.Root
                   className="time-input"
                   type="text"
                   inputMode="decimal"
@@ -1375,26 +1262,26 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
             </div>
             <label>
               播放位置
-              <input
-                type="range"
-                min="0"
+              <RangeInput
+                label="播放位置"
+                min={0}
                 max={videoInfo?.duration ?? 0}
-                step="0.01"
+                step={0.01}
                 value={currentTime}
                 disabled={!videoInfo}
-                onChange={(event) => seekVideo(Number(event.target.value))}
+                onValueChange={seekVideo}
               />
             </label>
             <div className="clip-actions">
-              <button className="small-button secondary" disabled={!videoInfo} onClick={setClipStartFromCurrent}>
+              <Button className="small-button secondary" disabled={!videoInfo} onClick={setClipStartFromCurrent}>
                 <SkipBack size={16} />
                 设为开始
-              </button>
+              </Button>
             </div>
-            <button className="wide-button secondary" disabled={!videoInfo} onClick={playClip}>
+            <Button className="wide-button secondary" disabled={!videoInfo} onClick={playClip}>
               <Play size={17} />
               播放片段
-            </button>
+            </Button>
           </section>
 
           <section className="panel-section">
@@ -1408,28 +1295,28 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
           <section className="panel-section">
             <div className="section-title">
               <Repeat size={18} />
-              <h2>输出</h2>
+              <h2>导出设置</h2>
             </div>
             <label>
               帧率
-              <input
-                type="range"
-                min="6"
-                max="24"
+              <RangeInput
+                label="帧率"
+                min={6}
+                max={24}
                 value={fps}
-                onChange={(event) => setFps(Number(event.target.value))}
+                onValueChange={setFps}
               />
             </label>
             <div className="range-value">{fps} fps</div>
             <label>
               变速
-              <input
-                type="range"
+              <RangeInput
+                label="变速"
                 min={MIN_SPEED_LEVEL}
                 max={MAX_SPEED_LEVEL}
-                step="1"
+                step={1}
                 value={speedLevel}
-                onChange={(event) => setSpeedLevel(Number(event.target.value))}
+                onValueChange={setSpeedLevel}
               />
             </label>
             <div className="range-scale">
@@ -1440,7 +1327,7 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
             <div className="range-value">{speedLabel}</div>
             <label>
               输出宽度
-              <input
+              <TextField.Root
                 type="number"
                 min="1"
                 inputMode="numeric"
@@ -1451,26 +1338,24 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
             </label>
             <div className="range-value">{outputSizeLabel}</div>
             <label className="switch-row">
-              <input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} />
+              <Switch checked={loop} onCheckedChange={setLoop} aria-label="循环播放" />
               循环播放
             </label>
-            <button className="wide-button" type="button" disabled={!canExport} onClick={exportGif}>
+            <Button className="wide-button" type="button" disabled={!canExport} onClick={exportGif}>
               {busy === "export" ? <Loader2 className="spin" size={17} /> : <Download size={17} />}
               导出 GIF
-            </button>
+            </Button>
           </section>
 
-          <section className="panel-section">
-            <div className="section-title">
+          <details className="panel-section text-panel">
+            <summary className="section-title">
               <Type size={18} />
-              <h2>文字</h2>
-            </div>
+              <h2>添加文字</h2><span className="optional-label">可选</span>
+            </summary>
+            <div className="text-panel-content">
             <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={text.enabled}
-                onChange={(event) => setText((current) => ({ ...current, enabled: event.target.checked }))}
-              />
+              <Switch checked={text.enabled} aria-label="启用文字"
+                onCheckedChange={checked => setText(current => ({ ...current, enabled: checked }))} />
               启用文字
             </label>
             <input
@@ -1481,37 +1366,28 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
               multiple
               onChange={(event) => void uploadFonts(event.currentTarget.files)}
             />
-            <textarea
+            <TextArea
               rows={3}
+              aria-label="表情文字"
               value={text.content}
               placeholder="输入表情文字"
               onChange={(event) => setText((current) => ({ ...current, content: event.target.value }))}
             />
             <label>
               字体
-              <select
-                value={text.font_id ?? ""}
-                onChange={(event) =>
-                  setText((current) => ({ ...current, font_id: event.target.value || null }))
-                }
-              >
-                <option value="">系统默认</option>
-                {fonts.map((font) => (
-                  <option key={font.id} value={font.id}>
-                    {font.name}
-                  </option>
-                ))}
-              </select>
+              <FieldSelect label="字体" value={text.font_id ?? "default"}
+                onValueChange={value => setText(current => ({ ...current, font_id: value === "default" ? null : value }))}
+                options={[{ value: "default", label: "系统默认" }, ...fonts.map(font => ({ value: font.id, label: font.name }))]} />
             </label>
             <div className="font-actions">
-              <button className="small-button secondary" disabled={Boolean(fontBusy)} onClick={() => void loadFonts()}>
+              <Button className="small-button secondary" disabled={Boolean(fontBusy)} onClick={() => void loadFonts()}>
                 {fontBusy === "load" ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
                 刷新
-              </button>
-              <button className="small-button" disabled={Boolean(fontBusy)} onClick={() => fontInputRef.current?.click()}>
+              </Button>
+              <Button className="small-button" disabled={Boolean(fontBusy)} onClick={() => fontInputRef.current?.click()}>
                 {fontBusy === "upload" ? <Loader2 className="spin" size={16} /> : <FolderUp size={16} />}
                 上传字体
-              </button>
+              </Button>
             </div>
             <div
               className="font-preview"
@@ -1523,20 +1399,13 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
             <div className="field-grid two">
               <label>
                 位置
-                <select
-                  value={text.position}
-                  onChange={(event) =>
-                    setText((current) => ({ ...current, position: event.target.value as TextLayer["position"] }))
-                  }
-                >
-                  <option value="top">顶部</option>
-                  <option value="center">居中</option>
-                  <option value="bottom">底部</option>
-                </select>
+                <FieldSelect label="文字位置" value={text.position}
+                  onValueChange={value => setText(current => ({ ...current, position: value as TextLayer["position"] }))}
+                  options={[{ value: "top", label: "顶部" }, { value: "center", label: "居中" }, { value: "bottom", label: "底部" }]} />
               </label>
               <label>
                 字号
-                <input
+                <TextField.Root
                   type="number"
                   min="12"
                   max="96"
@@ -1572,19 +1441,23 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
               </label>
             </div>
             <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={text.box}
-                onChange={(event) => setText((current) => ({ ...current, box: event.target.checked }))}
-              />
+              <Switch checked={text.box} aria-label="背景框"
+                onCheckedChange={checked => setText(current => ({ ...current, box: checked }))} />
               背景框
             </label>
-          </section>
+            </div>
+          </details>
         </aside>
+        </div>
 
-        <section className="preview-pane">
+        <section className="preview-pane" aria-label="GIF 实时预览">
+          <div className="preview-heading"><span><Play size={16} />实时预览</span><span className="preview-badge">{videoInfo ? "拖动选框裁剪画面" : "你的下一张表情包，从这里开始"}</span></div>
           <div
-            className={`video-stage ${videoInfo ? "" : "empty"}`}
+            className={`video-stage ${videoInfo ? "" : "empty"} ${isDragging ? "drag-over" : ""}`}
+            aria-busy={busy === "upload" || busy === "download"}
+            onDragOver={(event) => { event.preventDefault(); if (!busy) setIsDragging(true); }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false); }}
+            onDrop={(event) => { event.preventDefault(); setIsDragging(false); const file = event.dataTransfer.files[0]; if (file && !busy) void loadUploadedFile(file); }}
             ref={stageRef}
             onPointerDown={handleStagePointerDown}
             onPointerMove={handlePointerMove}
@@ -1652,15 +1525,21 @@ function GifPage({ navigateTo }: { navigateTo: NavigateTo }) {
               </>
             ) : (
               <div className="empty-state">
-                <Film size={48} />
-                <span>等待视频</span>
+                <div className="empty-character"><LittleCharacter /></div>
+                <h2>{isDragging ? "松开鼠标，把视频放进来" : "给喜欢的片段，做个表情包"}</h2>
+                <p>拖一个视频到这里，或者点击下方按钮上传</p>
+                <Button className="primary-button" type="button" disabled={Boolean(busy)} onClick={() => fileInputRef.current?.click()}>
+                  {busy === "upload" || busy === "download" ? <Loader2 className="spin" size={17} /> : <Upload size={17} />}
+                  {busy === "upload" ? "正在上传…" : busy === "download" ? "正在下载…" : "选择视频"}
+                </Button>
+                <span className="empty-formats">支持 MP4、MOV、WebM 等视频格式</span>
               </div>
             )}
           </div>
 
           <div className="status-row">
             {error ? (
-              <div className="error-box">{error}</div>
+              <div className="error-box" role="alert">{error}</div>
             ) : (
               <div className="hint-box">
                 <Clock3 size={16} />
@@ -1902,15 +1781,15 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
     <main className="app-shell audio-shell">
       <ToolHeader
         currentPage="audio"
-        title="BV 音频片段"
-        subtitle={bilibiliSource.status || "从 Bilibili BV 号提取音频片段"}
+        title="视频提取音频"
+        subtitle={bilibiliSource.status || "把喜欢的旋律和声音，从 B 站视频里单独留下。"}
         icon={<Music size={24} />}
         navigateTo={navigateTo}
         actions={
-          <button className="primary-button" type="button" disabled={!canExtract} onClick={() => void extractAudio()}>
+          <Button className="primary-button" type="button" disabled={!canExtract} onClick={() => void extractAudio()}>
             {busy === "extract" ? <Loader2 className="spin" size={18} /> : <Download size={18} />}
             提取音频
-          </button>
+          </Button>
         }
       />
 
@@ -1919,12 +1798,13 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
           <section className="panel-section audio-panel audio-source-panel">
             <div className="section-title">
               <Music size={18} />
-              <h2>视频源</h2>
+              <h2>导入视频</h2>
             </div>
             <div className="bv-row">
-              <input
+              <TextField.Root
                 value={bilibiliSource.bv}
-                placeholder="BV1... 或 bilibili 视频 URL"
+                aria-label="Bilibili 视频链接或 BV 号"
+                placeholder="粘贴 B 站视频链接或 BV 号"
                 onChange={(event) => bilibiliSource.updateInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -1932,7 +1812,7 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
                   }
                 }}
               />
-              <button
+              <Button
                 type="button"
                 disabled={!bilibiliSource.canUse}
                 onClick={() => void bilibiliSource.refreshPages()}
@@ -1940,26 +1820,18 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
               >
                 {busy === "pages" ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
                 识别
-              </button>
+              </Button>
             </div>
             {bilibiliSource.availablePages.length > 1 ? (
               <label>
                 分 P
-                <select
-                  value={bilibiliSource.page}
-                  disabled={Boolean(busy)}
-                  onChange={(event) => bilibiliSource.selectPage(Number(event.target.value))}
-                >
-                  {bilibiliSource.availablePages.map((page) => (
-                    <option key={page.page} value={page.page}>
-                      {formatBilibiliPageOption(page)}
-                    </option>
-                  ))}
-                </select>
+                <FieldSelect label="分 P" value={bilibiliSource.page} disabled={Boolean(busy)}
+                  onValueChange={value => bilibiliSource.selectPage(Number(value))}
+                  options={bilibiliSource.availablePages.map(page => ({ value: page.page, label: formatBilibiliPageOption(page) }))} />
               </label>
             ) : null}
             {bilibiliSource.status ? <div className="metric">{bilibiliSource.status}</div> : null}
-            <button
+            <Button
               className="wide-button"
               type="button"
               disabled={!canDownload}
@@ -1967,18 +1839,18 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
             >
               {busy === "download" ? <Loader2 className="spin" size={17} /> : <Download size={17} />}
               下载视频
-            </button>
+            </Button>
           </section>
 
           <section className="panel-section audio-panel audio-clip-panel">
             <div className="section-title">
               <Scissors size={18} />
-              <h2>片段</h2>
+              <h2>选择片段</h2>
             </div>
             <div className="field-grid two">
               <label>
                 开始
-                <input
+                <TextField.Root
                   className="time-input"
                   type="text"
                   placeholder="0:00"
@@ -1999,7 +1871,7 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
               </label>
               <label>
                 结束
-                <input
+                <TextField.Root
                   className="time-input"
                   type="text"
                   inputMode="decimal"
@@ -2039,14 +1911,14 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
               </div>
             </div>
             <div className="clip-actions two">
-              <button className="small-button secondary" type="button" disabled={!videoInfo} onClick={setAudioStartFromCurrent}>
+              <Button className="small-button secondary" type="button" disabled={!videoInfo} onClick={setAudioStartFromCurrent}>
                 <SkipBack size={16} />
                 设为开始
-              </button>
-              <button className="small-button secondary" type="button" disabled={!videoInfo} onClick={setAudioEndFromCurrent}>
+              </Button>
+              <Button className="small-button secondary" type="button" disabled={!videoInfo} onClick={setAudioEndFromCurrent}>
                 <Clock3 size={16} />
                 设为结束
-              </button>
+              </Button>
             </div>
             <div className="range-value">当前 {currentTimeLabel}</div>
           </section>
@@ -2081,62 +1953,45 @@ function AudioExtractorPage({ navigateTo }: { navigateTo: NavigateTo }) {
                   onTimeUpdate={onPreviewTimeUpdate}
                 />
                 <div className="audio-preview-actions">
-                  <button className="small-button" type="button" disabled={!canPreview} onClick={playAudioClip}>
+                  <Button className="small-button" type="button" disabled={!canPreview} onClick={playAudioClip}>
                     <Play size={16} />
                     {previewing ? "重新试听" : "试听片段"}
-                  </button>
-                  <button className="small-button secondary" type="button" disabled={!previewing} onClick={stopAudioPreview}>
+                  </Button>
+                  <Button className="small-button secondary" type="button" disabled={!previewing} onClick={stopAudioPreview}>
                     停止
-                  </button>
+                  </Button>
                 </div>
                 <div className="metric">{videoInfo.filename} · {formatTimeInput(videoInfo.duration)}</div>
               </>
             ) : (
-              <div className="audio-empty">请先下载视频，再试听选中的音频片段</div>
+              <div className="audio-empty"><span className="audio-empty-icon"><AudioLines size={34} strokeWidth={1.4} /></span><h3>好声音，值得单独收藏</h3><p>导入 B 站视频后，在这里试听选中的片段。</p><span className="empty-formats">MP3 · M4A · WAV</span></div>
             )}
           </section>
 
           <section className="panel-section audio-panel audio-output-panel">
             <div className="section-title">
               <Download size={18} />
-              <h2>输出</h2>
+              <h2>导出设置</h2>
             </div>
-            <div className="format-options" role="group" aria-label="音频格式">
-              {(["mp3", "m4a", "wav"] as AudioFormat[]).map((item) => (
-                <button
-                  key={item}
-                  className={`format-option ${format === item ? "active" : ""}`}
-                  type="button"
-                  aria-pressed={format === item}
-                  onClick={() => {
-                    setFormat(item);
-                    setResult(null);
-                  }}
-                >
-                  {item.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl.Root className="format-options" value={format} aria-label="音频格式"
+              onValueChange={value => { setFormat(value as AudioFormat); setResult(null); }}>
+              {(["mp3", "m4a", "wav"] as AudioFormat[]).map(item =>
+                <SegmentedControl.Item key={item} value={item}>{item.toUpperCase()}</SegmentedControl.Item>)}
+            </SegmentedControl.Root>
             <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={enhanceAudio}
-                onChange={(event) => {
-                  setEnhanceAudio(event.target.checked);
-                  setResult(null);
-                }}
-              />
-              增强
+              <Switch checked={enhanceAudio} aria-label="音频增强"
+                onCheckedChange={checked => { setEnhanceAudio(checked); setResult(null); }} />
+              音频增强
             </label>
-            <button className="wide-button" type="button" disabled={!canExtract} onClick={() => void extractAudio()}>
+            <Button className="wide-button" type="button" disabled={!canExtract} onClick={() => void extractAudio()}>
               {busy === "extract" ? <Loader2 className="spin" size={17} /> : <Download size={17} />}
               {enhanceAudio ? "增强并下载" : "提取并下载"}
-            </button>
+            </Button>
           </section>
 
           <section className="status-row audio-status">
             {error ? (
-              <div className="error-box">{error}</div>
+              <div className="error-box" role="alert">{error}</div>
             ) : (
               <div className="hint-box">
                 <Clock3 size={16} />
@@ -2239,7 +2094,7 @@ function ShareCard({
           <span className="share-brand-mark">V2A</span>
           <div>
             <strong>Video to Any</strong>
-            <span>智能视频创作引擎</span>
+            <span>你的视频小工坊</span>
           </div>
         </div>
         <div className="share-qr">
@@ -2406,23 +2261,32 @@ function SummaryProgressPopover({
   onClose: () => void;
   onViewResult?: (bv: string, page: number) => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (popover.done || popover.error) dialogRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [popover.open, popover.done, popover.error]);
   if (!popover.open) {
     return null;
   }
   return (
-    <div className="summary-popover" role="dialog" aria-modal="true">
-      <div className="summary-popover-card">
+    <Dialog.Root open={popover.open} onOpenChange={open => { if (!open && (popover.done || popover.error)) onClose(); }}>
+      <Dialog.Content ref={dialogRef} className="summary-popover-card" maxWidth="410px" aria-describedby={undefined}
+        onEscapeKeyDown={event => { if (!popover.done && !popover.error) event.preventDefault(); }}
+        onPointerDownOutside={event => { if (!popover.done && !popover.error) event.preventDefault(); }}
+        onOpenAutoFocus={() => { previousFocus.current = document.activeElement as HTMLElement | null; }}
+        onCloseAutoFocus={event => { event.preventDefault(); previousFocus.current?.focus(); }}>
         {popover.error ? (
           <>
             <div className="summary-popover-icon error">
               <AlertCircle size={28} />
             </div>
-            <h3>生成失败</h3>
+            <Dialog.Title>生成失败</Dialog.Title>
             <p className="summary-popover-msg">{popover.error}</p>
             <div className="summary-popover-actions">
-              <button type="button" onClick={onClose}>
+              <Button type="button" onClick={onClose}>
                 关闭
-              </button>
+              </Button>
             </div>
           </>
         ) : popover.done && onViewResult ? (
@@ -2430,12 +2294,12 @@ function SummaryProgressPopover({
             <div className="summary-popover-icon done">
               <Check size={28} />
             </div>
-            <h3>总结生成完成</h3>
+            <Dialog.Title>总结生成完成</Dialog.Title>
             <p className="summary-popover-msg">
               已为 {popover.bv} P{popover.page} 生成总结，点击查看完整内容与可分享链接。
             </p>
             <div className="summary-popover-actions">
-              <button
+              <Button
                 type="button"
                 className="primary"
                 onClick={() => {
@@ -2445,10 +2309,10 @@ function SummaryProgressPopover({
                 }}
               >
                 查看总结 <ArrowRight size={16} />
-              </button>
-              <button type="button" onClick={onClose}>
+              </Button>
+              <Button type="button" onClick={onClose}>
                 留在本页
-              </button>
+              </Button>
             </div>
           </>
         ) : (
@@ -2456,20 +2320,15 @@ function SummaryProgressPopover({
             <div className="summary-popover-icon working">
               <Loader2 className="spin" size={28} />
             </div>
-            <h3>{popover.stage}</h3>
-            <div className="summary-progress-bar" aria-hidden="true">
-              <div
-                className="summary-progress-fill"
-                style={{ width: `${popover.progress}%` }}
-              />
-            </div>
+            <Dialog.Title aria-live="polite">{popover.stage}</Dialog.Title>
+            <Progress value={popover.progress} aria-label="总结生成进度" />
             <p className="summary-popover-hint">
               正在调用大模型，长视频可能需要数十秒，请勿关闭页面。
             </p>
           </>
         )}
-      </div>
-    </div>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -2535,22 +2394,24 @@ function SummaryPage({
     <main className="app-shell summary-shell">
       <ToolHeader
         currentPage="summary"
-        title="BV 视频总结"
-        subtitle="输入 BV 号，自动拉取 CC 字幕并生成结构化总结"
+        title="视频内容总结"
+        subtitle="长视频先看重点，帮你留住知识、金句和灵感。"
         icon={<FileText size={24} />}
         navigateTo={navigateTo}
       />
 
-      <section className="tool-board summary-board">
-        <section className="panel-section">
+      <section className="tool-board summary-board summary-input-board">
+        <div className="summary-builder">
+        <section className="panel-section summary-source-panel">
           <div className="section-title">
             <Video size={18} />
             <h2>视频来源</h2>
           </div>
           <div className="bv-row">
-            <input
+            <TextField.Root
               value={bilibiliSource.bv}
-              placeholder="BV1... 或 bilibili 视频 URL"
+              aria-label="Bilibili 视频链接或 BV 号"
+                placeholder="粘贴 B 站视频链接或 BV 号"
               onChange={(event) => bilibiliSource.updateInput(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -2558,7 +2419,7 @@ function SummaryPage({
                 }
               }}
             />
-            <button
+            <Button
               type="button"
               disabled={!bilibiliSource.canUse}
               onClick={() => void bilibiliSource.refreshPages()}
@@ -2566,28 +2427,20 @@ function SummaryPage({
             >
               {busy === "pages" ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
               识别
-            </button>
+            </Button>
           </div>
           {bilibiliSource.availablePages.length > 1 ? (
             <label>
               分 P
-              <select
-                value={bilibiliSource.page}
-                disabled={Boolean(busy)}
-                onChange={(event) => bilibiliSource.selectPage(Number(event.target.value))}
-              >
-                {bilibiliSource.availablePages.map((page) => (
-                  <option key={page.page} value={page.page}>
-                    {formatBilibiliPageOption(page)}
-                  </option>
-                ))}
-              </select>
+              <FieldSelect label="分 P" value={bilibiliSource.page} disabled={Boolean(busy)}
+                  onValueChange={value => bilibiliSource.selectPage(Number(value))}
+                  options={bilibiliSource.availablePages.map(page => ({ value: page.page, label: formatBilibiliPageOption(page) }))} />
             </label>
           ) : null}
           {bilibiliSource.recognized ? (
             <SummaryVideoCard recognized={bilibiliSource.recognized} page={bilibiliSource.page} />
           ) : null}
-          <button
+          <Button
             className="wide-button"
             type="button"
             disabled={!canGenerate}
@@ -2595,13 +2448,21 @@ function SummaryPage({
           >
             {generating ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
             {generating ? "正在生成…" : "生成总结"}
-          </button>
+          </Button>
           {bilibiliSource.status ? <div className="metric">{bilibiliSource.status}</div> : null}
-          {error ? <div className="metric summary-error">{error}</div> : null}
-          <div className="metric summary-hint">
-            提示：仅支持带 CC 字幕（人工或 AI 字幕）的视频；长视频会分段总结后合并。
+          {error ? <div className="metric summary-error" role="alert">{error}</div> : null}
+          <div className="metric summary-hint"><AlertCircle size={15} />
+            视频需要有 CC 字幕（人工或 AI 字幕）。长视频也可以，内容会分段整理。
           </div>
         </section>
+        </div>
+        <aside className="summary-explainer">
+          <span className="summary-explainer-icon"><Sparkles size={26} strokeWidth={1.5} /></span>
+          <span className="section-eyebrow">LESS WATCHING, MORE KNOWING</span>
+          <h2>把长视频，<br />变成一份清楚的笔记。</h2>
+          <p>一个链接，整理好值得留下的内容。</p>
+          <ul><li><FileText size={18} /><div><strong>先掌握全貌</strong><span>快速了解视频讲了什么。</span></div></li><li><Clock3 size={18} /><div><strong>重点都有时间点</strong><span>点击时间，回到对应的讲解。</span></div></li><li><Quote size={18} /><div><strong>留住金句与知识</strong><span>复制笔记，或保存为分享卡片。</span></div></li></ul>
+        </aside>
       </section>
 
       <SummaryProgressPopover
@@ -2723,11 +2584,12 @@ function SummaryResultPage({
       const qrTarget = config.site_url
         ? `${config.site_url}/#${summaryPath}`
         : `${window.location.origin}/#${summaryPath}`;
+      const { toDataURL: renderQrDataUrl } = await import("qrcode");
       const qr = await renderQrDataUrl(qrTarget, {
         margin: 1,
         width: 320,
         errorCorrectionLevel: "M",
-        color: { dark: "#2a2118", light: "#fff1cf" }
+        color: { dark: "#292536", light: "#ffffff" }
       });
       setQrDataUrl(qr);
       // Wait for React to commit the freshly-set QR <img> and the browser to
@@ -2743,6 +2605,7 @@ function SummaryResultPage({
       if (!target) {
         throw new Error("分享卡片未就绪");
       }
+      const { default: html2canvas } = await import("html2canvas-pro");
       const canvas = await html2canvas(target, {
         scale: 2,
         useCORS: true,
@@ -2782,7 +2645,7 @@ function SummaryResultPage({
     <main className="app-shell summary-shell">
       <ToolHeader
         currentPage="summary"
-        title="BV 视频总结"
+        title="视频内容总结"
         subtitle="结构化总结 · 可分享"
         icon={<FileText size={24} />}
         navigateTo={navigateTo}
@@ -2818,16 +2681,16 @@ function SummaryResultPage({
               {error || `未找到 ${bv} P${page} 的总结。`}
             </p>
             <div className="summary-popover-actions">
-              <button
+              <Button
                 type="button"
                 className="primary"
                 onClick={() => setRetryKey((key) => key + 1)}
               >
                 重试
-              </button>
-              <button type="button" onClick={() => navigateTo("summary")}>
+              </Button>
+              <Button type="button" onClick={() => navigateTo("summary")}>
                 去生成总结 <ArrowRight size={16} />
-              </button>
+              </Button>
             </div>
           </section>
         ) : null}
@@ -2846,24 +2709,24 @@ function SummaryResultPage({
                   </div>
                 </div>
                 <div className="summary-actions">
-                  <button type="button" onClick={() => void copyMarkdown()}>
+                  <Button type="button" onClick={() => void copyMarkdown()}>
                     {copied ? "已复制" : "复制 Markdown"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     onClick={() => void downloadShareImage()}
                     disabled={shareBusy}
                   >
                     {shareBusy ? <Loader2 className="spin" size={15} /> : <ImageIcon size={15} />}
                     {shareBusy ? "生成中…" : "下载分享图"}
-                  </button>
-                  <button type="button" onClick={downloadSubtitle}>
+                  </Button>
+                  <Button type="button" onClick={downloadSubtitle}>
                     <Download size={15} />
                     下载字幕
-                  </button>
-                  <button type="button" onClick={() => navigateTo("summary")}>
+                  </Button>
+                  <Button type="button" onClick={() => navigateTo("summary")}>
                     生成新总结
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -2949,7 +2812,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => routeFromHash());
 
   useEffect(() => {
-    const syncRoute = () => setRoute(routeFromHash());
+    const syncRoute = () => { setRoute(routeFromHash()); window.scrollTo({ top: 0, behavior: "instant" }); };
     window.addEventListener("hashchange", syncRoute);
     return () => window.removeEventListener("hashchange", syncRoute);
   }, []);
@@ -2957,6 +2820,7 @@ export function App() {
   const navigateTo = useCallback((nextPage: AppPage) => {
     window.location.hash = nextPage === "home" ? "#/" : `#/${nextPage}`;
     setRoute(nextPage);
+    window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
 
   const navigateToSummaryResult = useCallback((bv: string, page: number) => {

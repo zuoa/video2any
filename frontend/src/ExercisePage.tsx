@@ -1,5 +1,6 @@
+import { Button, Checkbox, Progress, TextArea, TextField } from "@radix-ui/themes";
 import { useEffect, useRef, useState } from "react";
-import { FileText, Loader2, RefreshCw, Upload } from "lucide-react";
+import { FileText, Loader2, RefreshCw } from "lucide-react";
 import { ToolHeader, SiteFooter, apiUrl, parseBilibiliInput } from "./App";
 import type { AppPage } from "./App";
 import type { BilibiliPagesResponse, VideoInfo } from "./types";
@@ -7,6 +8,8 @@ import { MathMarkdown } from "./MathMarkdown";
 import ExerciseHistory from "./ExerciseHistory";
 import { difficultyLabels, exercisePageHref, typeLabels } from "./exerciseTypes";
 import type { Difficulty, Point, QType, Question, SavedExercisePage } from "./exerciseTypes";
+import { UploadField } from "./components/UploadField";
+import { FieldSelect } from "./components/FieldSelect";
 import "./exercises.css";
 
 type ASRBackend = "sensevoice" | "qwen3" | "whisper";
@@ -222,54 +225,54 @@ export default function ExercisePage({ navigateTo }: { navigateTo: (page: AppPag
       <h2>1. 导入讲课视频</h2>
       <p className="exercise-note">当前语音识别模型：{selectedModel?.label ?? "读取配置中…"}{selectedModel ? ` · ${selectedModel.description}` : ""}</p>
       <div className="exercise-source">
-        <label className="exercise-upload"><Upload size={18} /> 上传视频<input type="file" accept="video/*" disabled={busy || !asrOptions} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ""; }} /></label>
-        <div className="exercise-bili"><input aria-label="BV 号或 B 站地址" placeholder="BV 号或 Bilibili 视频地址" value={bv} disabled={busy} onChange={event => { setBv(event.target.value); setPages(null); }} /><button disabled={busy || !asrOptions || !bv.trim()} onClick={() => void discoverBili()}>读取视频</button></div>
+        <UploadField label="上传讲课视频" hint="点击选择或拖入视频 · 支持 MP4、MOV、WebM 等格式" disabled={busy || !asrOptions} busy={pending && !active} onSelect={upload} />
+        <div className="exercise-bili"><TextField.Root aria-label="BV 号或 B 站地址" placeholder="BV 号或 Bilibili 视频地址" value={bv} disabled={busy} onChange={event => { setBv(event.target.value); setPages(null); }} /><Button variant="soft" className="exercise-button" disabled={busy || !asrOptions || !bv.trim()} onClick={() => void discoverBili()}>读取视频</Button></div>
       </div>
-      {pages && pages.pages.length > 1 ? <div className="exercise-row"><label>分 P <select value={page} disabled={busy} onChange={event => setPage(Number(event.target.value))}>{pages.pages.map(p => <option key={p.page} value={p.page}>P{p.page} · {p.title}</option>)}</select></label><button disabled={busy} onClick={() => void run(() => downloadBili(pages.bv, page))}>下载并识别</button></div> : null}
+      {pages && pages.pages.length > 1 ? <div className="exercise-row"><label>分 P <FieldSelect label="分 P" value={page} disabled={busy} onValueChange={value => setPage(Number(value))} options={pages.pages.map(p => ({ value: p.page, label: `P${p.page} · ${p.title}` }))} /></label><Button variant="soft" className="exercise-button" disabled={busy} onClick={() => void run(() => downloadBili(pages.bv, page))}>下载并识别</Button></div> : null}
       <p className="exercise-note">根据讲解语音生成。PPT 或板书中未念出的内容，可在转写文字或知识点中手动补充。</p>
     </section>
     {error ? <div role="alert" className="exercise-error">{error}</div> : null}
     {pending && !active ? <div className="exercise-status" role="status"><Loader2 className="spin" size={18} /> 正在处理请求…</div> : null}
-    {job ? <div className="exercise-status" role="status">{active ? <Loader2 className="spin" size={18} /> : null}<span>{stages[job.stage] ?? job.stage} {active ? `${job.progress}%` : ""}</span>{active ? <progress value={job.progress} max={100} /> : null}{job.status === "failed" ? <button disabled={busy} onClick={() => void retry()}><RefreshCw size={16} /> 重试任务</button> : null}</div> : null}
+    {job ? <div className="exercise-status" role="status">{active ? <Loader2 className="spin" size={18} /> : null}<span>{stages[job.stage] ?? job.stage} {active ? `${job.progress}%` : ""}</span>{active ? <Progress value={job.progress} max={100} aria-label="任务处理进度" className="exercise-progress" /> : null}{job.status === "failed" ? <Button variant="soft" className="exercise-button" disabled={busy} onClick={() => void retry()}><RefreshCw size={16} /> 重试任务</Button> : null}</div> : null}
     {lesson ? <>
       <section className="exercise-panel">
         <h2>2. 校对文字，确认知识点</h2>
         <p>{lesson.title} · {time(lesson.duration)} · 内容版本 {lesson.version} · {currentModel?.label ?? lesson.asr_backend ?? "Whisper"}</p>
         {(lesson.asr_backend ?? "whisper") !== asrBackend && asrOptions ? <div className="exercise-model-switch">
-          <button disabled={busy || pointsDirty || segmentsDirty} onClick={() => void switchModel()}>使用 {selectedModel?.label} 重新识别</button>
+          <Button variant="soft" className="exercise-button" disabled={busy || pointsDirty || segmentsDirty} onClick={() => void switchModel()}>使用 {selectedModel?.label} 重新识别</Button>
           <p className="exercise-note">重新识别会替换当前转写文字和知识点，旧题目批次保留。需要原视频仍在缓存中。请先保存当前修改。</p>
         </div> : null}
         <details><summary>查看视频与转写文字（{segments.length} 段）</summary>
           <video ref={video} controls preload="metadata" src={apiUrl(`/api/videos/${lesson.video_id}/file`)} className="exercise-video" />
           <p className="exercise-note">原视频缓存过期后仍可使用已保存的文字和题目。时间戳保持原视频位置，补充公式可用 $...$ 或 $$...$$。</p>
-          <div className="exercise-transcript">{segments.map((segment, index) => <label key={index}><button type="button" onClick={() => jump(index)}>{time(segment.start)}</button><textarea aria-label={`转写片段 ${index + 1}`} disabled={busy || pointsDirty} value={segment.text} onChange={event => setSegments(values => values.map((value, i) => i === index ? { ...value, text: event.target.value } : value))} /></label>)}</div>
-          <button disabled={busy || !segmentsDirty || pointsDirty || segments.some(s => !s.text.trim())} onClick={() => void saveTranscript()}>保存文字并重新提炼知识点</button>
+          <div className="exercise-transcript">{segments.map((segment, index) => <label key={index}><Button variant="soft" className="exercise-button" type="button" onClick={() => jump(index)}>{time(segment.start)}</Button><TextArea aria-label={`转写片段 ${index + 1}`} disabled={busy || pointsDirty} value={segment.text} onChange={event => setSegments(values => values.map((value, i) => i === index ? { ...value, text: event.target.value } : value))} /></label>)}</div>
+          <Button variant="soft" className="exercise-button" disabled={busy || !segmentsDirty || pointsDirty || segments.some(s => !s.text.trim())} onClick={() => void saveTranscript()}>保存文字并重新提炼知识点</Button>
         </details>
         {points.length ? <>
-          <div className="exercise-row"><button disabled={busy} onClick={() => setChosenPoints(points.map(p => p.id))}>全选知识点</button><span>已选 {chosenPoints.length} / {points.length}</span>{pointsDirty ? <button disabled={busy || segmentsDirty || points.some(p => !p.title.trim() || !p.detail.trim())} onClick={() => void savePoints()}>保存知识点修改</button> : null}</div>
+          <div className="exercise-row"><Button variant="soft" className="exercise-button" disabled={busy} onClick={() => setChosenPoints(points.map(p => p.id))}>全选知识点</Button><span>已选 {chosenPoints.length} / {points.length}</span>{pointsDirty ? <Button variant="soft" className="exercise-button" disabled={busy || segmentsDirty || points.some(p => !p.title.trim() || !p.detail.trim())} onClick={() => void savePoints()}>保存知识点修改</Button> : null}</div>
           <div className="exercise-points">{points.map((point, index) => <article key={point.id} className="exercise-point">
-            <label className="exercise-point-heading"><input type="checkbox" checked={chosenPoints.includes(point.id)} disabled={busy} onChange={() => setChosenPoints(values => toggle(values, point.id))} /><strong>{point.title}</strong></label>
+            <label className="exercise-point-heading"><Checkbox aria-label={`选择知识点：${point.title}`} checked={chosenPoints.includes(point.id)} disabled={busy} onCheckedChange={() => setChosenPoints(values => toggle(values, point.id))} /><strong>{point.title}</strong></label>
             <MathMarkdown text={point.detail} />{point.formulas ? <MathMarkdown text={point.formulas} /> : null}
-            <div className="exercise-evidence">{point.segment_ids.slice(0, 8).map(id => <button key={id} onClick={() => jump(id)}>{time(segments[id]?.start ?? 0)}</button>)}{lesson.source.bv ? <a href={`https://www.bilibili.com/video/${lesson.source.bv}?p=${lesson.source.page ?? 1}&t=${Math.floor(segments[point.segment_ids[0]]?.start ?? 0)}`} target="_blank" rel="noreferrer">回看 B 站讲解</a> : null}</div>
-            <details><summary>编辑知识点 / 补充公式</summary>{(["title", "detail", "formulas"] as const).map(field => <label key={field}>{({ title: "标题", detail: "讲解", formulas: "公式" })[field]}<textarea disabled={busy || segmentsDirty} value={point[field]} onChange={event => setPoints(values => values.map((value, i) => i === index ? { ...value, [field]: event.target.value } : value))} /></label>)}</details>
+            <div className="exercise-evidence">{point.segment_ids.slice(0, 8).map(id => <Button variant="soft" className="exercise-button" key={id} onClick={() => jump(id)}>{time(segments[id]?.start ?? 0)}</Button>)}{lesson.source.bv ? <a href={`https://www.bilibili.com/video/${lesson.source.bv}?p=${lesson.source.page ?? 1}&t=${Math.floor(segments[point.segment_ids[0]]?.start ?? 0)}`} target="_blank" rel="noreferrer">回看 B 站讲解</a> : null}</div>
+            <details><summary>编辑知识点 / 补充公式</summary>{(["title", "detail", "formulas"] as const).map(field => <label key={field}>{({ title: "标题", detail: "讲解", formulas: "公式" })[field]}<TextArea disabled={busy || segmentsDirty} value={point[field]} onChange={event => setPoints(values => values.map((value, i) => i === index ? { ...value, [field]: event.target.value } : value))} /></label>)}</details>
           </article>)}</div>
         </> : <p className="exercise-note">{active ? "识别后将在这里展示知识点。" : "尚无知识点；检查任务状态后重试。"}</p>}
       </section>
       <section className="exercise-panel">
         <h2>3. 生成候选题</h2>
-        <fieldset disabled={busy}><legend>题型</legend><div className="exercise-row">{(Object.keys(typeLabels) as QType[]).map(type => <label key={type}><input type="checkbox" checked={types.includes(type)} onChange={() => setTypes(values => toggle(values, type) as QType[])} />{typeLabels[type]}</label>)}</div></fieldset>
-        <div className="exercise-row"><label>难度<select disabled={busy} value={difficulty} onChange={event => setDifficulty(event.target.value as Difficulty)}>{Object.entries(difficultyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>生成数量<input type="number" min={1} max={30} disabled={busy} value={count} onChange={event => setCount(Number(event.target.value))} /></label><button disabled={busy || !chosenPoints.length || !types.length || pointsDirty || segmentsDirty || !Number.isInteger(count) || count < 1 || count > 30} onClick={() => void generate()}>{lesson.batches.length ? "再生成一批题目" : "确认知识点并生成题目"}</button></div>
+        <fieldset disabled={busy}><legend>题型</legend><div className="exercise-row">{(Object.keys(typeLabels) as QType[]).map(type => <label key={type}><Checkbox aria-label={typeLabels[type]} disabled={busy} checked={types.includes(type)} onCheckedChange={() => setTypes(values => toggle(values, type) as QType[])} />{typeLabels[type]}</label>)}</div></fieldset>
+        <div className="exercise-row"><label>难度<FieldSelect label="难度" disabled={busy} value={difficulty} onValueChange={value => setDifficulty(value as Difficulty)} options={Object.entries(difficultyLabels).map(([value, label]) => ({ value, label }))} /></label><label>生成数量<TextField.Root className="exercise-count" type="number" min={1} max={30} disabled={busy} value={count} onChange={event => setCount(Number(event.target.value))} /></label><Button variant="soft" className="exercise-button" disabled={busy || !chosenPoints.length || !types.length || pointsDirty || segmentsDirty || !Number.isInteger(count) || count < 1 || count > 30} onClick={() => void generate()}>{lesson.batches.length ? "再生成一批题目" : "确认知识点并生成题目"}</Button></div>
         {pointsDirty || segmentsDirty ? <p className="exercise-note">请先保存修改，再生成题目。</p> : null}
         {chosenPoints.length > count ? <p className="exercise-note">题数少于知识点数，本批会从所选范围均匀取点出题；增加题数可覆盖更多知识点。</p> : null}
       </section>
       {lesson.batches.length ? <section className="exercise-panel">
         <h2>4. 预览选题，打开打印页面</h2>
-        <label>题目批次<select disabled={busy} value={batchId} onChange={event => { const value = lesson.batches.find(b => b.id === event.target.value); setBatchId(event.target.value); setSelected(value?.questions.map(q => q.id) ?? []); setTitle(batchTitle(lesson, value)); }}>{lesson.batches.map((value, index) => <option key={value.id} value={value.id}>第 {index + 1} 批 · 内容版本 {value.version} · {value.questions.length} 题</option>)}</select></label>
+        <label>题目批次<FieldSelect label="题目批次" disabled={busy} value={batchId} onValueChange={id => { const value = lesson.batches.find(b => b.id === id); setBatchId(id); setSelected(value?.questions.map(q => q.id) ?? []); setTitle(batchTitle(lesson, value)); }} options={lesson.batches.map((value, index) => ({ value: value.id, label: `第 ${index + 1} 批 · 内容版本 ${value.version} · ${value.questions.length} 题` }))} /></label>
         {batch && batch.version !== lesson.version ? <p className="exercise-note">此批题目基于内容版本 {batch.version}。当前内容已更新，可重新生成一批题目。</p> : null}
         {batch?.page_slug ? <p className="exercise-saved-link">本批试题已自动保存：<a href={exercisePageHref(batch.page_slug)}>查看完整试题与打印 →</a><span className="exercise-history-slug">{batch.page_slug}</span></p> : null}
-        <div className="exercise-row"><button disabled={busy} onClick={() => setSelected(batch?.questions.map(q => q.id) ?? [])}>全选</button><button disabled={busy} onClick={() => setSelected([])}>清空选择</button><strong>已选 {selected.length} 题</strong></div>
-        <div className="exercise-questions">{batch?.questions.map((question, index) => <article key={question.id} className="exercise-question"><label className="exercise-point-heading"><input type="checkbox" disabled={busy} checked={selected.includes(question.id)} onChange={() => setSelected(values => toggle(values, question.id))} /><strong>第 {index + 1} 题</strong><span>{typeLabels[question.type]} · {difficultyLabels[question.difficulty]}</span></label><MathMarkdown text={question.stem} />{question.options.map((option, i) => <div className="exercise-option" key={i}><strong>{String.fromCharCode(65 + i)}.</strong><MathMarkdown text={option} /></div>)}<details><summary>查看答案与解析</summary><h4>答案</h4><MathMarkdown text={question.answer} /><h4>解析</h4><MathMarkdown text={question.explanation} /></details></article>)}</div>
-        <div className="exercise-export"><label>练习卷标题<input maxLength={120} disabled={busy} value={title} onChange={event => setTitle(event.target.value)} /></label><div className="exercise-row"><button disabled={busy || !selected.length || !title.trim()} onClick={() => void savePage()}><FileText size={17} />保存所选题目并打开页面</button></div><p className="exercise-note">页面地址使用知识点拼音，同名页面按序号区分。保存后可分别查看、打印练习卷和答案解析。</p></div>
+        <div className="exercise-row"><Button variant="soft" className="exercise-button" disabled={busy} onClick={() => setSelected(batch?.questions.map(q => q.id) ?? [])}>全选</Button><Button variant="soft" className="exercise-button" disabled={busy} onClick={() => setSelected([])}>清空选择</Button><strong>已选 {selected.length} 题</strong></div>
+        <div className="exercise-questions">{batch?.questions.map((question, index) => <article key={question.id} className="exercise-question"><label className="exercise-point-heading"><Checkbox aria-label={`选择第 ${index + 1} 题`} disabled={busy} checked={selected.includes(question.id)} onCheckedChange={() => setSelected(values => toggle(values, question.id))} /><strong>第 {index + 1} 题</strong><span>{typeLabels[question.type]} · {difficultyLabels[question.difficulty]}</span></label><MathMarkdown text={question.stem} />{question.options.map((option, i) => <div className="exercise-option" key={i}><strong>{String.fromCharCode(65 + i)}.</strong><MathMarkdown text={option} /></div>)}<details><summary>查看答案与解析</summary><h4>答案</h4><MathMarkdown text={question.answer} /><h4>解析</h4><MathMarkdown text={question.explanation} /></details></article>)}</div>
+        <div className="exercise-export"><label>练习卷标题<TextField.Root maxLength={120} disabled={busy} value={title} onChange={event => setTitle(event.target.value)} /></label><div className="exercise-row"><Button variant="soft" className="exercise-button" disabled={busy || !selected.length || !title.trim()} onClick={() => void savePage()}><FileText size={17} />保存所选题目并打开页面</Button></div><p className="exercise-note">页面地址使用知识点拼音，同名页面按序号区分。保存后可分别查看、打印练习卷和答案解析。</p></div>
       </section> : null}
     </> : null}
     <SiteFooter currentPage="exercises" navigateTo={navigateTo} />

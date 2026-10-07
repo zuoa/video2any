@@ -1,3 +1,4 @@
+import { Button, TextField } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { Copy, FileText, Printer } from "lucide-react";
 import { apiUrl, SiteFooter, ToolHeader } from "./App";
@@ -38,12 +39,12 @@ export default function ExercisePaperPage({ slug, navigateTo }: { slug: string; 
   }
   return <main className="app-shell exercise-shell exercise-paper-shell">
     <div className="exercise-no-print"><ToolHeader currentPage="exercises" title="试题预览与打印" subtitle="保存页面地址，随时回看和打印" icon={<FileText size={24} />} navigateTo={navigateTo} /></div>
-    {error ? <div className="exercise-panel exercise-no-print" role="alert">{error}<div className="exercise-row"><button onClick={() => setRetry(value => value + 1)}>重新读取</button><a href="#/exercises">返回试题记录</a></div></div>
+    {error ? <div className="exercise-panel exercise-no-print" role="alert">{error}<div className="exercise-row"><Button variant="soft" className="exercise-button" onClick={() => setRetry(value => value + 1)}>重新读取</Button><a href="#/exercises">返回试题记录</a></div></div>
       : !paper ? <div className="exercise-panel exercise-no-print" role="status">正在读取试题…</div> : <>
       <section className="exercise-panel exercise-paper-toolbar exercise-no-print">
         <div className="exercise-row"><a href="#/exercises">← 返回出题与历史记录</a><a href={`#/exercises?lesson=${encodeURIComponent(paper.lesson_id)}`}>继续为这门课程出题</a></div>
-        <div className="exercise-row" aria-label="试题显示方式"><button aria-pressed={mode === "worksheet"} onClick={() => setMode("worksheet")}>练习卷</button><button aria-pressed={mode === "answers"} onClick={() => setMode("answers")}>答案解析</button><button className="exercise-print-button" onClick={() => window.print()}><Printer size={18} />打印{mode === "worksheet" ? "练习卷" : "答案解析"}</button><button onClick={() => void copyLink()}><Copy size={16} />复制页面地址</button></div>
-        <label className="exercise-paper-address">页面地址<input aria-label="试题页面地址" readOnly value={href} onFocus={event => event.currentTarget.select()} /></label>
+        <div className="exercise-row" aria-label="试题显示方式"><Button variant="soft" className="exercise-button" aria-pressed={mode === "worksheet"} onClick={() => setMode("worksheet")}>练习卷</Button><Button variant="soft" className="exercise-button" aria-pressed={mode === "answers"} onClick={() => setMode("answers")}>答案解析</Button><Button variant="soft" className="exercise-button exercise-print-button" onClick={() => window.print()}><Printer size={18} />打印{mode === "worksheet" ? "练习卷" : "答案解析"}</Button><Button variant="soft" className="exercise-button" onClick={() => void copyLink()}><Copy size={16} />复制页面地址</Button></div>
+        <label className="exercise-paper-address">页面地址<TextField.Root aria-label="试题页面地址" readOnly value={href} onFocus={event => event.currentTarget.select()} /></label>
         {copyStatus ? <p role="status" className="exercise-note">{copyStatus}</p> : null}
         <p className="exercise-note">A4 排版，练习卷留答题空间。切换到答案解析后可单独打印，也可在打印窗口保存为 PDF。</p>
       </section>

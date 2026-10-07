@@ -1,3 +1,4 @@
+import { Button } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { apiUrl } from "./App";
 import { exercisePageHref } from "./exerciseTypes";
@@ -30,7 +31,7 @@ export default function ExerciseHistory({ revision = "", compact = false }: { re
   return <section className="exercise-panel exercise-history" aria-label="最近生成的试题">
     <h2>最近生成的试题</h2>
     <p className="exercise-note">已生成的题目会自动保存。点击标题即可回看和打印。</p>
-    {error ? <p role="alert">{error} <button onClick={() => setRetry(value => value + 1)}>重新读取</button></p>
+    {error ? <p role="alert">{error} <Button variant="soft" className="exercise-button" onClick={() => setRetry(value => value + 1)}>重新读取</Button></p>
       : loading ? <p role="status">正在读取试题记录…</p>
       : items.length ? <ul className="exercise-history-list">{items.map(item => <li key={item.slug}>
         <a href={exercisePageHref(item.slug)}><strong>{item.title}</strong><span className="exercise-history-slug">{item.slug}</span></a>
@@ -38,6 +39,6 @@ export default function ExerciseHistory({ revision = "", compact = false }: { re
         <p className="exercise-note">{item.knowledge_point_titles.join("、") || item.lesson_title}</p>
       </li>)}</ul> : <p className="exercise-note">还没有生成过试题，完成出题后会显示在这里。</p>}
     {compact ? <a className="exercise-history-more" href="#/exercises">进入出题工作台，查看全部记录 →</a>
-      : total > pageSize ? <div className="exercise-row"><button disabled={loading || offset === 0} onClick={() => setOffset(value => Math.max(0, value - pageSize))}>上一页</button><span>第 {Math.floor(offset / pageSize) + 1} 页 · 共 {total} 份试题</span><button disabled={loading || offset + pageSize >= total} onClick={() => setOffset(value => value + pageSize)}>下一页</button></div> : null}
+      : total > pageSize ? <div className="exercise-row"><Button variant="soft" className="exercise-button" disabled={loading || offset === 0} onClick={() => setOffset(value => Math.max(0, value - pageSize))}>上一页</Button><span>第 {Math.floor(offset / pageSize) + 1} 页 · 共 {total} 份试题</span><Button variant="soft" className="exercise-button" disabled={loading || offset + pageSize >= total} onClick={() => setOffset(value => value + pageSize)}>下一页</Button></div> : null}
   </section>;
 }
