@@ -8,25 +8,25 @@ import { Footer, SiteNavigation } from "./SiteChrome";
 const ExerciseHistory = lazy(() => import("../ExerciseHistory"));
 const waveHeights = [8, 15, 23, 11, 29, 38, 20, 31, 45, 26, 17, 33, 22, 40, 29, 15, 24, 10, 18, 7];
 const toolCards = [
-  { page: "gif", icon: Film, title: "视频转 GIF", description: "把那个忍不住重看的瞬间，做成会动的表情包。", tags: ["自由裁剪", "添加文字", "变速循环"], action: "制作 GIF", color: "purple", format: ".gif" },
-  { page: "audio", icon: Music, title: "视频提取音频", description: "一段喜欢的旋律，一句想留住的话，单独存下来。", tags: ["片段试听", "音频增强", "多种格式"], action: "提取音频", color: "pink", format: ".mp3" },
-  { page: "summary", icon: Sparkles, title: "视频内容总结", description: "长视频先看重点，让知识和灵感都有迹可循。", tags: ["内容概览", "时间点", "分享卡片"], action: "生成总结", color: "green", format: ".md" },
-  { page: "exercises", icon: BookOpen, title: "讲课视频转练习题", description: "从听懂到真正掌握，给刚学到的知识出几道题。", tags: ["知识点提炼", "多种题型", "打印试卷"], action: "生成练习题", color: "orange", format: "A4" }
+  { page: "gif", icon: Film, title: "视频转 GIF", description: "把那个忍不住重看的瞬间，做成会动的表情包。", tags: ["自由裁剪", "添加文字", "变速循环"], action: "制作 GIF", format: ".gif" },
+  { page: "audio", icon: Music, title: "视频提取音频", description: "一段喜欢的旋律，一句想留住的话，单独存下来。", tags: ["片段试听", "音频增强", "多种格式"], action: "提取音频", format: ".mp3" },
+  { page: "summary", icon: Sparkles, title: "视频内容总结", description: "长视频先看重点，让知识和灵感都有迹可循。", tags: ["内容概览", "时间点", "分享卡片"], action: "生成总结", format: ".md" },
+  { page: "exercises", icon: BookOpen, title: "讲课视频转练习题", description: "从听懂到真正掌握，给刚学到的知识出几道题。", tags: ["知识点提炼", "多种题型", "打印试卷"], action: "生成练习题", format: "A4" }
 ] as const;
 
 export function LittleCharacter({ compact = false }: { compact?: boolean }) {
   return <svg className={compact ? "little-character compact" : "little-character"} viewBox="0 0 240 190" fill="none" aria-hidden="true">
-    <ellipse cx="122" cy="172" rx="66" ry="8" fill="#6550A7" opacity=".12" />
+    <ellipse cx="122" cy="172" rx="66" ry="8" fill="var(--ink)" opacity=".12" />
     <g className="character-body">
-      <path d="M71 103C49 91 39 105 49 122C54 131 61 134 70 132M173 97C195 86 207 96 194 114C190 120 184 124 176 124" fill="#D6F381" stroke="#536534" strokeWidth="3" strokeLinejoin="round" />
-      <path d="M91 145L82 163C79 169 84 173 95 169L107 149M141 147L150 166C153 172 164 170 161 164L156 143" fill="#D6F381" stroke="#536534" strokeWidth="3" strokeLinejoin="round" />
-      <path d="M70 58C62 42 76 26 94 34C107 18 128 22 137 35C156 26 174 40 171 58C190 72 184 92 178 105C185 128 167 148 147 148C133 160 112 156 102 148C79 154 62 136 67 116C52 100 54 77 70 58Z" fill="#D6F381" stroke="#536534" strokeWidth="3" />
-      <path d="M77 74C83 48 98 43 112 42" stroke="#F1FFD0" strokeWidth="6" strokeLinecap="round" />
-      <ellipse cx="103" cy="84" rx="5" ry="7" fill="#38412A" /><ellipse cx="143" cy="84" rx="5" ry="7" fill="#38412A" />
-      <path d="M112 99Q123 112 135 99" stroke="#38412A" strokeWidth="3.5" strokeLinecap="round" />
-      <ellipse cx="90" cy="101" rx="8" ry="4" fill="#A9CD61" /><ellipse cx="155" cy="101" rx="8" ry="4" fill="#A9CD61" />
+      <path d="M71 103C49 91 39 105 49 122C54 131 61 134 70 132M173 97C195 86 207 96 194 114C190 120 184 124 176 124" fill="var(--wheat)" stroke="#565a38" strokeWidth="3" strokeLinejoin="round" />
+      <path d="M91 145L82 163C79 169 84 173 95 169L107 149M141 147L150 166C153 172 164 170 161 164L156 143" fill="var(--wheat)" stroke="#565a38" strokeWidth="3" strokeLinejoin="round" />
+      <path d="M70 58C62 42 76 26 94 34C107 18 128 22 137 35C156 26 174 40 171 58C190 72 184 92 178 105C185 128 167 148 147 148C133 160 112 156 102 148C79 154 62 136 67 116C52 100 54 77 70 58Z" fill="var(--wheat)" stroke="#565a38" strokeWidth="3" />
+      <path d="M77 74C83 48 98 43 112 42" stroke="#f5edca" strokeWidth="6" strokeLinecap="round" />
+      <ellipse cx="103" cy="84" rx="5" ry="7" fill="#3f452f" /><ellipse cx="143" cy="84" rx="5" ry="7" fill="#3f452f" />
+      <path d="M112 99Q123 112 135 99" stroke="#3f452f" strokeWidth="3.5" strokeLinecap="round" />
+      <ellipse cx="90" cy="101" rx="8" ry="4" fill="#c1ad61" /><ellipse cx="155" cy="101" rx="8" ry="4" fill="#c1ad61" />
     </g>
-    <path className="character-spark" d="M200 37V51M193 44H207M34 63V73M29 68H39" stroke="#8D74CD" strokeWidth="3" strokeLinecap="round" />
+    <path className="character-spark" d="M200 37V51M193 44H207M34 63V73M29 68H39" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" />
   </svg>;
 }
 
@@ -63,7 +63,7 @@ export default function HomePage({ navigateTo }: { navigateTo: (page: AppPage) =
       </section>
       <section className="tools-section" id="tools" aria-labelledby="tools-title">
         <div className="tools-heading"><div><span className="section-eyebrow">THE TOOLBOX</span><h2 id="tools-title">你的视频，想变成什么？</h2></div><span className="tools-heading-note"><WandSparkles size={15} />四个小工具，刚好够用</span></div>
-        <div className="tool-grid">{toolCards.map(({ page, icon: Icon, title, description, tags, action, color, format }) => <button className={`tool-card tool-card-${color}`} type="button" key={page} onClick={() => navigateTo(page)}>
+        <div className="tool-grid">{toolCards.map(({ page, icon: Icon, title, description, tags, action, format }) => <button className={`tool-card tool-card-${page}`} type="button" key={page} onClick={() => navigateTo(page)}>
           <span className="tool-card-top"><span className="tool-card-icon"><Icon size={25} strokeWidth={1.6} /></span><span className="tool-format">{format}</span></span>
           <span className="tool-card-title">{title}</span><span className="tool-card-copy">{description}</span>
           <span className="tool-tags">{tags.map(tag => <span key={tag}>{tag}</span>)}</span>

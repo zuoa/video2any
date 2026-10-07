@@ -2589,7 +2589,7 @@ function SummaryResultPage({
         margin: 1,
         width: 320,
         errorCorrectionLevel: "M",
-        color: { dark: "#292536", light: "#ffffff" }
+        color: { dark: "#26332d", light: "#fffefb" }
       });
       setQrDataUrl(qr);
       // Wait for React to commit the freshly-set QR <img> and the browser to
@@ -2609,7 +2609,7 @@ function SummaryResultPage({
       const canvas = await html2canvas(target, {
         scale: 2,
         useCORS: true,
-        backgroundColor: "#fff1cf",
+        backgroundColor: "#fffefb",
         logging: false
       });
       const dataUrl = canvas.toDataURL("image/png");

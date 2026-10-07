@@ -3,11 +3,35 @@
   --default-font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --heading-font-family: var(--default-font-family);
   --code-font-family: var(--utility-font);
-  --color-background: #faf9fd;
-  --accent-9: #7658cb;
-  --accent-10: #6243b4;
-  --accent-11: #6243b4;
-  --accent-a9: #7658cb;
+  --color-background: var(--canvas);
+  --accent-1: #fbfcf8;
+  --accent-2: #f4f7ef;
+  --accent-3: #e7efe2;
+  --accent-4: #dce7d7;
+  --accent-5: #ccdcca;
+  --accent-6: #bacdb6;
+  --accent-7: #9db799;
+  --accent-8: #7c997b;
+  --accent-9: var(--accent);
+  --accent-10: var(--accent-dark);
+  --accent-11: var(--accent-dark);
+  --accent-12: #1c3025;
+  --accent-a1: #30554503;
+  --accent-a2: #30554508;
+  --accent-a3: #30554510;
+  --accent-a4: #30554518;
+  --accent-a5: #30554525;
+  --accent-a6: #30554536;
+  --accent-a7: #30554550;
+  --accent-a8: #30554570;
+  --accent-a9: var(--accent);
+  --accent-a10: var(--accent-dark);
+  --accent-a11: var(--accent-dark);
+  --accent-a12: #1c3025;
+  --accent-contrast: var(--paper);
+  --accent-surface: var(--surface-soft);
+  --accent-indicator: var(--accent);
+  --accent-track: var(--accent);
   --cursor-button: pointer;
   --cursor-checkbox: pointer;
   --cursor-switch: pointer;
@@ -15,21 +39,21 @@
 }
 .app-theme { min-height: 100vh; }
 .rt-Button { box-sizing: border-box; white-space: normal; height: auto; min-height: 38px; }
-.rt-TextFieldRoot, .rt-TextAreaRoot { width: 100%; min-width: 0; background: #fcfbfe; }
+.rt-TextFieldRoot, .rt-TextAreaRoot { width: 100%; min-width: 0; background: var(--surface-soft); }
 .rt-TextFieldRoot { min-height: 40px; height: auto; }
 .rt-TextFieldInput, .rt-TextAreaInput { font-size: 13px; }
-.rt-TextFieldInput::placeholder, .rt-TextAreaInput::placeholder { color: #82788e; }
+.rt-TextFieldInput::placeholder, .rt-TextAreaInput::placeholder { color: var(--muted); }
 .rt-TextAreaInput { line-height: 1.8; resize: vertical; }
 .field-select { width: 100%; min-height: 40px; height: auto; justify-content: space-between; text-align: left; font-size: 13px; }
 .field-select .rt-SelectTriggerInner { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field-select-menu { max-width: calc(100vw - 32px); }
 .field-select-menu .rt-SelectItem { font-size: 13px; }
 .range-input { position: relative; display: flex; align-items: center; width: 100%; height: 24px; touch-action: none; user-select: none; }
-.range-track { position: relative; flex-grow: 1; height: 4px; border-radius: 10px; background: #e4dceb; overflow: hidden; }
+.range-track { position: relative; flex-grow: 1; height: 4px; border-radius: 10px; background: var(--line); overflow: hidden; }
 .range-fill { position: absolute; height: 100%; border-radius: inherit; background: var(--accent); }
-.range-thumb { display: block; width: 16px; height: 16px; border: 3px solid var(--accent); border-radius: 50%; background: white; box-shadow: 0 1px 4px #7658cb25; cursor: grab; }
+.range-thumb { display: block; width: 16px; height: 16px; border: 3px solid var(--accent); border-radius: 50%; background: var(--paper); box-shadow: 0 1px 4px #26332d25; cursor: grab; }
 .range-thumb:active { cursor: grabbing; }
-.range-thumb:focus-visible { outline: 3px solid #a993e5; outline-offset: 4px; }
+.range-thumb:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
 .range-input[data-disabled] { opacity: .45; }
 .range-input[data-disabled] .range-thumb { cursor: not-allowed; }
 .format-options.rt-SegmentedControlRoot { display: flex; width: 100%; padding: 4px; gap: 0; }
@@ -42,7 +66,7 @@
 .exercise-panel .rt-TextAreaRoot { flex: 1; }
 .exercise-panel .rt-TextAreaInput { min-height: 84px; }
 .exercise-bili .rt-TextFieldRoot, .exercise-export .rt-TextFieldRoot, .exercise-paper-address .rt-TextFieldRoot { flex: 1; }
-.rt-DialogOverlay { background: #29203555; backdrop-filter: blur(5px); }
+.rt-DialogOverlay { background: #26332d55; backdrop-filter: blur(5px); }
 .rt-DialogContent.help-dialog { margin: 0; }
 .rt-DialogContent.summary-popover-card { margin: 0; }
 .summary-popover-card .rt-DialogTitle { margin: 0; font-size: 19px; }

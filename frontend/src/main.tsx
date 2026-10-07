@@ -8,7 +8,7 @@ import "./ui.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Theme className="app-theme" appearance="light" accentColor="violet" grayColor="mauve" radius="large" panelBackground="solid">
+    <Theme className="app-theme" appearance="light" accentColor="green" grayColor="olive" radius="large" panelBackground="solid">
       <App />
     </Theme>
   </React.StrictMode>
