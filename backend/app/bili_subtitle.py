@@ -8,18 +8,27 @@ first 32 positions, which is all the WBI mixin key ever uses, so it is correct.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass, field
-from http.cookiejar import LoadError, MozillaCookieJar
 from urllib.parse import urlencode
 
 import requests
 
 from .config import settings
 from .ffmpeg_tools import VideoProcessingError
+from .bili_auth import (
+    USER_AGENT as _USER_AGENT,
+    _cookie_dict_from_jar,
+    _is_bili_cookie_domain,
+    _parse_cookie_header,
+    _parse_json_cookie_export,
+    _parse_netscape_cookie_text,
+    get_cookie_jar,
+    load_cookies as _load_cookies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +41,18 @@ MIXIN_KEY_ENC_TAB = [
 
 _wbi_keys_cache: dict[str, object] = {"mixin_key": None, "fetched_at": 0.0}
 _last_request_time = 0.0
-_session: requests.Session | None = None
-
-_BILI_COOKIE_DOMAIN = "bilibili.com"
-_LEGACY_BILI_COOKIE_KEYS = {"SESSDATA", "buvid3"}
-_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-)
+_rate_limit_lock = threading.Lock()
+_http_sessions = threading.local()
 
 
 def _rate_limit() -> None:
     global _last_request_time
-    elapsed = time.time() - _last_request_time
-    gap = settings.bili_rate_limit_seconds
-    if elapsed < gap:
-        time.sleep(gap - elapsed)
-    _last_request_time = time.time()
+    with _rate_limit_lock:
+        elapsed = time.monotonic() - _last_request_time
+        gap = settings.bili_rate_limit_seconds
+        if elapsed < gap:
+            time.sleep(gap - elapsed)
+        _last_request_time = time.monotonic()
 
 
 def _get_mixin_key(raw_key: str) -> str:
@@ -62,10 +66,12 @@ def _fetch_wbi_keys() -> str:
         return cached  # type: ignore[return-value]
 
     try:
+        cookies = _load_cookies()
+        _rate_limit()
         resp = requests.get(
             "https://api.bilibili.com/x/web-interface/nav",
             headers={"User-Agent": _USER_AGENT},
-            cookies=_load_cookies(),
+            cookies=cookies,
             timeout=10,
         )
         data = resp.json()
@@ -105,145 +111,29 @@ def _sign_params(params: dict) -> dict:
     return params
 
 
-# --- Cookie loading (adapted to this project's settings) ---
-
-def _is_bili_cookie_domain(domain: str) -> bool:
-    domain = (domain or "").lstrip(".").lower()
-    return domain == _BILI_COOKIE_DOMAIN or domain.endswith(f".{_BILI_COOKIE_DOMAIN}")
-
-
-def _cookie_dict_from_jar(jar: MozillaCookieJar) -> dict:
-    cookies: dict[str, str] = {}
-    for cookie in jar:
-        if cookie.name and cookie.value and _is_bili_cookie_domain(cookie.domain):
-            cookies[cookie.name] = cookie.value
-    return cookies
-
-
-def _parse_netscape_cookie_text(text: str) -> dict:
-    cookies: dict[str, str] = {}
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("#HttpOnly_"):
-            line = line[len("#HttpOnly_"):]
-        elif line.startswith("#"):
-            continue
-
-        parts = line.split("\t", 6)
-        if len(parts) != 7:
-            parts = line.split(None, 6)
-        if len(parts) != 7:
-            continue
-
-        domain, _include_subdomains, _path, _secure, _expires, name, value = parts
-        if name and value and _is_bili_cookie_domain(domain):
-            cookies[name] = value
-    return cookies
-
-
-def _parse_json_cookie_export(parsed: object) -> dict:
-    if isinstance(parsed, list):
-        cookies: dict[str, str] = {}
-        for item in parsed:
-            cookies.update(_parse_json_cookie_export(item))
-        return cookies
-
-    if not isinstance(parsed, dict):
-        return {}
-
-    if "name" in parsed and "value" in parsed:
-        domain = str(parsed.get("domain", ""))
-        if domain and not _is_bili_cookie_domain(domain):
-            return {}
-        name = str(parsed.get("name", ""))
-        value = str(parsed.get("value", ""))
-        return {name: value} if name and value else {}
-
-    for key in ("cookies", "cookie"):
-        nested = parsed.get(key)
-        cookies = _parse_json_cookie_export(nested)
-        if cookies:
-            return cookies
-
-    return {
-        str(key): str(value)
-        for key, value in parsed.items()
-        if key in _LEGACY_BILI_COOKIE_KEYS and value
-    }
-
-
-def _parse_cookie_header(header: str) -> dict:
-    cookies: dict[str, str] = {}
-    for pair in (header or "").split(";"):
-        pair = pair.strip()
-        if not pair or "=" not in pair:
-            continue
-        name, value = pair.split("=", 1)
-        name = name.strip()
-        value = value.strip()
-        if name and value:
-            cookies[name] = value
-    return cookies
-
-
-def _load_cookies() -> dict:
-    """Merge Bilibili cookies from this project's three configured sources."""
-    cookies: dict[str, str] = {}
-
-    try:
-        cookies_file = settings.prepare_bilibili_cookies_file()
-    except FileNotFoundError:
-        cookies_file = None
-
-    if cookies_file:
-        try:
-            text = cookies_file.read_text(encoding="utf-8").lstrip()
-        except OSError:
-            text = ""
-        if text:
-            if text[0] in ("{", "["):
-                try:
-                    cookies.update(_parse_json_cookie_export(json.loads(text)))
-                except json.JSONDecodeError:
-                    pass
-            if not cookies:
-                jar = MozillaCookieJar()
-                try:
-                    jar.load(str(cookies_file), ignore_discard=True, ignore_expires=True)
-                    jar_cookies = _cookie_dict_from_jar(jar)
-                    if jar_cookies:
-                        cookies.update(jar_cookies)
-                except (LoadError, OSError):
-                    pass
-            if not cookies:
-                cookies.update(_parse_netscape_cookie_text(text))
-
-    if settings.bilibili_cookie_header:
-        cookies.update(_parse_cookie_header(settings.bilibili_cookie_header))
-
-    return cookies
-
-
 def _get_http_session() -> requests.Session:
-    global _session
-    if _session is None:
-        _session = requests.Session()
-        _session.headers.update({
+    session = getattr(_http_sessions, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update({
             "User-Agent": _USER_AGENT,
             "Referer": "https://www.bilibili.com",
         })
-    _session.cookies.update(_load_cookies())
-    return _session
+        _http_sessions.session = session
+    # Keep per-thread connection pooling, but replace the complete scoped jar
+    # on every call so stale auth fields and duplicate cookies cannot survive.
+    session.cookies.clear()
+    session.cookies.update(get_cookie_jar())
+    return session
 
 
 # --- Bilibili API calls ---
 
 def get_video_info(bvid: str) -> dict | None:
-    _rate_limit()
     try:
-        resp = _get_http_session().get(
+        session = _get_http_session()
+        _rate_limit()
+        resp = session.get(
             "https://api.bilibili.com/x/web-interface/view",
             params={"bvid": bvid},
             timeout=15,
@@ -270,10 +160,11 @@ def get_video_info(bvid: str) -> dict | None:
 
 
 def get_subtitle_urls(bvid: str, cid: int) -> list[dict] | None:
-    _rate_limit()
     params = _sign_params({"bvid": bvid, "cid": cid})
     try:
-        resp = _get_http_session().get(
+        session = _get_http_session()
+        _rate_limit()
+        resp = session.get(
             "https://api.bilibili.com/x/player/wbi/v2",
             params=params,
             timeout=15,
@@ -323,7 +214,9 @@ def fetch_image_bytes(image_url: str) -> bytes:
     if url.startswith("//"):
         url = "https:" + url
     try:
-        resp = _get_http_session().get(url, timeout=15)
+        session = _get_http_session()
+        _rate_limit()
+        resp = session.get(url, timeout=15)
         resp.raise_for_status()
         return resp.content
     except Exception as exc:

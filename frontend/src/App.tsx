@@ -47,6 +47,7 @@ import type {
 
 const ExercisePage = lazy(() => import("./ExercisePage"));
 const ExercisePaperPage = lazy(() => import("./ExercisePaperPage"));
+const AdminPage = lazy(() => import("./AdminPage"));
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -99,7 +100,7 @@ type NavigateTo = (page: AppPage) => void;
 type BilibiliBusy = "pages" | "download";
 type SummaryResultRoute = { name: "summary-result"; bv: string; page: number };
 type ExercisePaperRoute = { name: "exercise-paper"; slug: string };
-type Route = AppPage | SummaryResultRoute | ExercisePaperRoute;
+type Route = AppPage | "admin" | SummaryResultRoute | ExercisePaperRoute;
 
 interface BilibiliDownloadContext {
   bv: string;
@@ -126,6 +127,8 @@ function routeFromHash(): Route {
   const path = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
   const query = queryIndex >= 0 ? raw.slice(queryIndex + 1) : "";
   const segments = path.split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "_manage") return "admin";
 
   if (segments[0] === "summary") {
     if (segments[1]) {
@@ -2829,6 +2832,7 @@ export function App() {
     setRoute({ name: "summary-result", bv, page });
   }, []);
 
+  if (route === "admin") return <Suspense fallback={<main className="app-shell">正在加载管理页面…</main>}><AdminPage /></Suspense>;
   if (typeof route === "object" && route.name === "exercise-paper") {
     return <Suspense fallback={<main className="app-shell">正在加载试题页面…</main>}><ExercisePaperPage key={route.slug} slug={route.slug} navigateTo={navigateTo} /></Suspense>;
   }

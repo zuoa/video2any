@@ -28,7 +28,7 @@ docker run --rm -p 8000:8000 -v video2emoticon-data:/data video2any
 也可以使用 Compose：
 
 ```bash
-mkdir -p data/uploads data/downloads data/outputs data/fonts data/exercises data/models cookies
+mkdir -p data/uploads data/downloads data/outputs data/fonts data/exercises data/models data/admin cookies
 docker compose pull
 docker compose up
 ```
@@ -43,16 +43,46 @@ Compose 默认使用目录映射：
 ./data/exercises -> /data/exercises
 ./data/models    -> /data/models
 ./data/fonts     -> /data/fonts
+./data/admin     -> /data/admin
 ./cookies        -> /data/cookies
 ```
 
 字体文件可以通过页面上传，也可以直接放入 `data/fonts/` 后在页面点击刷新。支持 `.ttf`、`.otf`、`.ttc`、`.otc`。
 
+## 隐藏管理后台
+
+管理入口为 `/#/_manage`，首页和工具导航不显示入口，管理接口不出现在公开的 OpenAPI 文档中。后台可管理 Bilibili Cookie、刷新令牌和保活参数，以及大模型 API Key、接口地址、模型、超时与站点分享地址。
+
+首次使用时，在服务器创建管理员；没有默认密码，也没有公开注册接口：
+
+```bash
+# Compose 部署（先启动包含后台功能的新镜像）
+docker compose exec app python -m backend.app.admin_auth setup --username admin
+# 本地开发，在项目根目录执行；DATA_DIR 须与后端进程一致
+.venv/bin/python -m backend.app.admin_auth setup --username admin
+```
+
+命令会交互输入并确认密码，至少 12 个字符。Compose 部署后访问 `http://localhost:8005/#/_manage`，使用创建的账号登录。忘记密码时，将命令中的 `setup` 改为 `reset`；重置和后台修改密码都会使全部管理会话失效。
+
+配置保存后生效，无需改 `.env` 或重建容器；已保存的配置优先于环境变量，重启后仍然保留。大模型新调用使用新的连接设置；正在进行的调用继续使用原连接。基础设施和本地识别模型的配置（数据目录、端口、ASR 后端等）仍由部署配置控制。
+
+管理员密码采用带随机盐的 PBKDF2-SHA256 哈希，登录会话由服务器保存，8 小时过期，支持退出撤销。Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 下启用 Secure；修改配置需要 CSRF 校验和同源校验，登录失败有频率限制。已保存的 Cookie、令牌、API Key 不会通过管理接口回显。隐藏入口用于减少曝光，实际访问权限由后端鉴权控制。
+
+持久保留 `data/admin/`（管理员、会话及设置）和 `cookies/`（Bilibili 凭据），Compose 已挂载。密钥保存在服务端文件中，数据库和凭据文件权限为 `0600`，管理员目录为 `0700`。生产环境通过 HTTPS 访问；反向代理应保留原始 Host 并正确传递协议，使同源校验和 Secure Cookie 正常工作。
+
 ## Bilibili Cookie
 
-Bilibili 可能返回 `HTTP Error 412: Precondition Failed`，这通常需要带登录态 cookie 下载。
+Bilibili 下载和字幕接口共用一份登录态。服务启动时检查 Cookie，之后默认每 24 小时检查一次；Bilibili 返回需要刷新时，自动执行 Web Cookie 续期。临时网络错误和风控响应保留凭据，默认 5 分钟后重试；账号确实失效时提示重新登录。
 
-推荐方式是使用 Netscape 格式的 cookies 文件：
+推荐在隐藏管理后台的「Bilibili 账号」页导入凭据：
+
+1. 登录 Bilibili，复制浏览器 Cookie，或导出 Netscape / JSON 格式文件。至少需要 `SESSDATA`，自动续期还需 `bili_jct`，建议保留 `DedeUserID`、`buvid3`、`buvid4`。
+2. 在同一个浏览器打开开发者工具 → Application / 应用 → Local Storage / 本地存储 → `https://www.bilibili.com`，复制 `ac_time_value`，填入「刷新令牌」。Cookie 和令牌必须来自同一次登录，仅导出 Cookie 无法续期。
+3. 保存登录凭据，点击「检查并续期」查看状态；按需调整自动续期的检查间隔、失败重试和接口请求间隔。
+
+重新登录后，在后台重新导入 Cookie 和对应的刷新令牌。更换登录态时，未同时提交新令牌会清除原令牌，避免混用；仅补充令牌可保留原 Cookie。移除账号后，旧环境变量不会重新恢复账号。
+
+已有部署也兼容直接挂载 Netscape Cookie 文件：
 
 ```bash
 mkdir -p cookies
@@ -70,9 +100,34 @@ docker run --rm \
   video2any
 ```
 
-还支持把 Netscape cookies 文件内容放到 `BILIBILI_COOKIES` 环境变量中，服务会写入 `/data/cookies/bilibili.cookies.txt` 后交给 `yt-dlp`。
+还支持把 Netscape cookies 文件内容放到 `BILIBILI_COOKIES` 环境变量中。环境变量仅在 Cookie 文件不存在时初始化文件；已有文件优先，避免每次请求或重启用旧 Cookie 覆盖续期结果。原始 `Cookie` header 也只在文件中没有登录态时使用。在后台导入或移除账号后，以后台保存的登录态为准。
 
-`yt-dlp` 会在读取 cookies 文件后写回更新后的 cookie jar，因此 Compose 里的 `cookies/` 挂载需要保持可写。不要把 cookie 提交到 GitHub；`cookies/` 已加入 `.gitignore`。
+如果尚未通过后台管理账号，仍可用环境变量初始化刷新令牌和默认参数：
+
+```dotenv
+BILIBILI_REFRESH_TOKEN=同一次登录的ac_time_value
+BILIBILI_KEEPALIVE_ENABLED=true
+BILIBILI_CHECK_INTERVAL_SECONDS=86400
+BILIBILI_RETRY_INTERVAL_SECONDS=300
+```
+
+```bash
+docker compose up -d --force-recreate app
+```
+
+后台显示缓存状态，不触发上游请求；「检查并续期」才主动检查。`healthy` 表示检查成功且具备刷新令牌，`missing_refresh_token` 表示当前有效但无法续期，`refresh_required` 表示需要补充令牌，`expired` 表示需要重新导入凭据，`retrying` 表示临时失败。刷新返回 `86095` 时先重新获取刷新口令再重试，持续失败按短间隔重试。旧 `/api/bilibili/session` 接口也需要管理员登录。本地 `.env` 不会自动读取，但可以完全通过后台保存这些运行设置。
+
+新 Cookie 和匹配的新令牌会一起原子保存到 Cookie 文件旁的 `bilibili.cookies.session.json`，再写回 `bilibili.cookies.txt` 并确认刷新；确认请求失败后会使用已保存的新登录态继续恢复。后台检查与业务请求通过线程锁和文件锁协调，多个进程不会同时轮换令牌。下载任务使用独立临时 Cookie 文件，完成后删除，避免 `yt-dlp` 将旧凭据写回主文件。Compose 中的 `cookies/` 挂载需要可写并保留到下次部署。
+
+服务会优先使用保存的续期结果，因此无需每次刷新后修改 `.env`。Bilibili 密码变更、手动退出或风控强制下线仍需要重新登录，自动续期无法恢复已被撤销的会话。
+
+可在容器内手动检查一次（输出仅包含状态）：
+
+```bash
+docker compose exec app python -m backend.app.bili_auth
+```
+
+HTTP 412 也可能由网络出口或请求频率触发，不会直接被当作账号失效。续期协议参考 [bilibili-API-collect](https://github.com/pskdje/bilibili-API-collect/blob/main/docs/login/cookie_refresh.md) 和 [defy997/bilibili-api](https://github.com/defy997/bilibili-api/blob/main/refresh_local.py)；凭据保存与网络故障处理同时参考 [bilibili-cli](https://github.com/public-clis/bilibili-cli/blob/main/bili_cli/auth.py)。不要把 Cookie 或会话文件提交到 GitHub；`cookies/` 和 `data/` 已加入 `.gitignore`。
 
 ## 本地开发
 
@@ -124,6 +179,8 @@ docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/video2any:l
 
 ## 环境变量
 
+Bilibili、`OPENAI_*`、`SUMMARY_MAX_INPUT_CHARS` 和 `SITE_URL` 均可在管理后台保存；以下环境变量保留为部署默认值或旧部署的初始化来源。后台已保存的字段优先于环境变量。
+
 - `DATA_DIR`：运行时数据目录，默认 `/data`。
 - `FRONTEND_DIST`：前端静态文件目录，镜像内默认 `/app/frontend/dist`。
 - `FONT_FILE`：FFmpeg `drawtext` 使用的字体文件路径。
@@ -132,7 +189,11 @@ docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/video2any:l
 - `BILIBILI_COOKIES_FILE`：Netscape 格式 Bilibili cookies 文件路径，推荐挂载到 `/data/cookies/bilibili.cookies.txt`。
 - `BILIBILI_COOKIE_HEADER`：浏览器请求里的原始 `Cookie` header，例如 `SESSDATA=...; bili_jct=...`。
 - `BILIBILI_COOKIES`：Netscape cookies 文件内容，适合通过部署平台 Secret 注入。
-- `OPENAI_API_KEY`：视频总结工具调用大模型用的 API Key（必填，否则总结页会返回 503）。
+- `BILIBILI_REFRESH_TOKEN`：Web 登录刷新令牌，对应同一登录的 localStorage `ac_time_value`；自动续期所需，刷新后优先使用持久化的新令牌。
+- `BILIBILI_KEEPALIVE_ENABLED`：自动检查和续期，默认 `true`；设为 `false` 可关闭后台及请求前的检查。
+- `BILIBILI_CHECK_INTERVAL_SECONDS`：登录态检查间隔，默认 `86400`（24 小时），最小 `3600`；启动及业务请求共用检查结果。
+- `BILIBILI_RETRY_INTERVAL_SECONDS`：网络或续期临时失败后的重试间隔，默认 `300`，最小 `60`。
+- `OPENAI_API_KEY`：大模型 API Key 的可选初始值；可直接在后台填写，未配置有效密钥时总结页会返回 503。
 - `OPENAI_BASE_URL`：大模型 OpenAI 兼容接口地址，默认 `https://api.deepseek.com`。
 - `OPENAI_MODEL`：模型名，默认 `deepseek-chat`。
 - `OPENAI_TIMEOUT`：大模型响应读取等待超时（秒），默认 `300`；连接和连接池等待为 `10` 秒，发送请求为 `30` 秒。SDK 对超时、连接错误及部分 HTTP 错误最多自动重试 `2` 次，整个调用耗时可能超过此设置。
@@ -142,7 +203,7 @@ docker run -p 8000:8000 -v video2emoticon-data:/data ghcr.io/<owner>/video2any:l
 - `OPENAI_JSON_MODE`：练习题流程默认请求 `json_object` 输出；设为 `false` 可关闭。服务商明确拒绝 JSON 模式时自动回退，同一模型后续请求复用回退结果。
 - `SUMMARY_MAX_INPUT_CHARS`：总结分段时每段的字幕字符预算，默认 `9000`（越长越完整，但更慢更费 token）。
 
-出题及复核输出比普通视频总结长，默认给模型 `300` 秒的响应读取等待时间。已有 `.env` 如果写了 `OPENAI_TIMEOUT=60`，需改成 `OPENAI_TIMEOUT=300`；Compose 会优先使用 `.env` 中的显式值。执行 `docker compose up -d --force-recreate app` 应用配置，单纯 `restart` 不会更新环境变量。本地开发需修改启动进程的环境变量后重启。
+出题及复核输出比普通视频总结长，默认给模型 `300` 秒的响应读取等待时间。可在后台「大模型连接」将响应等待时间调整为 `300` 秒，保存后生效。尚未通过后台保存时，也可将 `.env` 的 `OPENAI_TIMEOUT=60` 改成 `OPENAI_TIMEOUT=300`，并执行 `docker compose up -d --force-recreate app` 应用环境变量；单纯 `restart` 不会更新环境变量。
 
 LLM 日志包含本次调用标识、读取超时、最大重试次数、总耗时和错误类型：`APITimeoutError` 表示超时，`status=429` 表示限流或额度问题，`status=5xx` 表示上游服务错误。`LLM output validation failed; regenerating once` 表示返回的 JSON / 题目结果不符合要求后重新生成，与网络重试不同；正常出题后的答案复核也会再调用一次模型。
 
@@ -157,7 +218,7 @@ OPENAI_THINKING_TYPE=disabled
 OPENAI_REASONING_EFFORT=
 ```
 
-使用现有智谱 API Key，重新创建容器应用环境变量：`docker compose up -d --force-recreate app`。这些配置需要更新后的代码或镜像支持；单纯修改旧版本的 `.env` 不会添加请求参数。
+也可在管理后台设置上述服务地址、模型和思考模式，保留现有智谱 API Key 后保存，无需重新创建容器。如果使用环境变量，执行 `docker compose up -d --force-recreate app`。这些配置需要包含对应代码的新镜像支持。
 
 ## 运行时依赖
 

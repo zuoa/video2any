@@ -11,10 +11,17 @@ services:
       - ./data/exercises:/data/exercises
       - ./data/models:/data/models
       - ./data/fonts:/data/fonts
+      - ./data/admin:/data/admin
       - ./cookies:/data/cookies
     environment:
       DATA_DIR: /data
       BILIBILI_COOKIES_FILE: /data/cookies/bilibili.cookies.txt
+      BILIBILI_COOKIE_HEADER: ${BILIBILI_COOKIE_HEADER:-}
+      BILIBILI_COOKIES: ${BILIBILI_COOKIES:-}
+      BILIBILI_REFRESH_TOKEN: ${BILIBILI_REFRESH_TOKEN:-}
+      BILIBILI_KEEPALIVE_ENABLED: ${BILIBILI_KEEPALIVE_ENABLED:-true}
+      BILIBILI_CHECK_INTERVAL_SECONDS: ${BILIBILI_CHECK_INTERVAL_SECONDS:-86400}
+      BILIBILI_RETRY_INTERVAL_SECONDS: ${BILIBILI_RETRY_INTERVAL_SECONDS:-300}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
       OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}

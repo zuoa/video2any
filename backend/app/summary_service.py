@@ -52,20 +52,23 @@ class LLMResponse(str):
 
 
 _client = None
+_client_configuration = None
+_client_lock = threading.Lock()
 
 
 def _get_client():
     if OpenAI is None:
         raise SummaryConfigError("openai 包未安装，无法调用大模型。")
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
-            timeout=httpx.Timeout(settings.openai_timeout, connect=10, write=30, pool=10),
-            max_retries=2,
-        )
-    return _client
+    global _client, _client_configuration
+    configuration = settings.runtime_snapshot("openai_api_key", "openai_base_url", "openai_timeout")
+    with _client_lock:
+        if _client is None or configuration != _client_configuration:
+            _client = OpenAI(
+                api_key=configuration[0], base_url=configuration[1],
+                timeout=httpx.Timeout(configuration[2], connect=10, write=30, pool=10), max_retries=2,
+            )
+            _client_configuration = configuration
+        return _client
 
 
 # --- Prompts ---

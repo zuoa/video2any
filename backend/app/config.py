@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 
@@ -14,6 +15,7 @@ os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 class Settings:
     def __init__(self) -> None:
+        self._runtime_lock = threading.RLock()
         data_dir = os.getenv("DATA_DIR")
         self.data_dir = Path(data_dir) if data_dir else PROJECT_ROOT / "data"
         self.uploads_dir = self.data_dir / "uploads"
@@ -48,6 +50,10 @@ class Settings:
             "BILIBILI_COOKIE"
         )
         self.bilibili_cookie_header = os.getenv("BILIBILI_COOKIE_HEADER")
+        self.bilibili_refresh_token = os.getenv("BILIBILI_REFRESH_TOKEN", "").strip()
+        self.bilibili_keepalive_enabled = os.getenv("BILIBILI_KEEPALIVE_ENABLED", "true").lower() not in {"false", "0", "no"}
+        self.bilibili_check_interval = max(3600, int(os.getenv("BILIBILI_CHECK_INTERVAL_SECONDS", "86400")))
+        self.bilibili_retry_interval = max(60, int(os.getenv("BILIBILI_RETRY_INTERVAL_SECONDS", "300")))
         self.frontend_dist = Path(
             os.getenv("FRONTEND_DIST", str(PROJECT_ROOT / "frontend" / "dist"))
         )
@@ -70,6 +76,20 @@ class Settings:
         self.bili_rate_limit_seconds = float(os.getenv("BILI_RATE_LIMIT_SECONDS", "1.0"))
         self.site_url = (os.getenv("SITE_URL") or "").strip().rstrip("/")
         self.font_file = self._find_font_file()
+        self.refresh_runtime()
+
+    def refresh_runtime(self) -> None:
+        from .admin_store import read_config
+
+        values = read_config(self.data_dir)
+        with self._runtime_lock:
+            for name, value in values.items():
+                setattr(self, name, value)
+
+    def runtime_snapshot(self, *names: str) -> tuple:
+        """Read related values together while administrators change settings."""
+        with self._runtime_lock:
+            return tuple(getattr(self, name) for name in names)
 
     def ensure_dirs(self) -> None:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -106,9 +126,16 @@ class Settings:
         if not cookie_text.endswith("\n"):
             cookie_text += "\n"
 
-        target = self.cookies_dir / "bilibili.cookies.txt"
-        target.write_text(cookie_text, encoding="utf-8")
-        target.chmod(0o600)
+        target = Path(self.bilibili_cookies_file).expanduser() if self.bilibili_cookies_file else self.cookies_dir / "bilibili.cookies.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Environment credentials bootstrap the file once. Repeated reads and
+        # restarts must not roll back cookies rotated by the session manager.
+        try:
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(cookie_text)
 
     def _find_font_file(self) -> str | None:
         configured = os.getenv("FONT_FILE")

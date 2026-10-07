@@ -5,13 +5,16 @@ import contextlib
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .bili_subtitle import NoSubtitleError, fetch_image_bytes
+from .bili_auth import ensure_session, session_status
+from .admin_auth import require_admin
+from .admin_routes import router as admin_router
 from .config import settings
 from .ffmpeg_tools import VideoProcessingError, build_audio_clip, build_gif, validate_crop
 from .fonts import font_media_type, get_font_file, list_fonts, save_fonts
@@ -51,6 +54,7 @@ logger = logging.getLogger(__name__)
 SOURCE_VIDEO_RETENTION_SECONDS = 24 * 60 * 60
 SOURCE_VIDEO_CLEANUP_INTERVAL_SECONDS = 60 * 60
 cleanup_task: asyncio.Task[None] | None = None
+bilibili_keepalive_task: asyncio.Task[None] | None = None
 
 app = FastAPI(
     title="Video to Any",
@@ -59,6 +63,23 @@ app = FastAPI(
 )
 
 app.include_router(exercise_router)
+app.include_router(admin_router)
+
+
+@app.middleware("http")
+async def runtime_config_and_admin_headers(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        await asyncio.to_thread(settings.refresh_runtime)
+    response = await call_next(request)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    if request.url.path.startswith("/api/_admin") or request.url.path == "/api/bilibili/session":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+    return response
 
 
 app.add_middleware(
@@ -100,6 +121,29 @@ async def cleanup_old_videos_loop() -> None:
         await asyncio.sleep(SOURCE_VIDEO_CLEANUP_INTERVAL_SECONDS)
 
 
+async def bilibili_keepalive_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(ensure_session)
+        except Exception:
+            logger.warning("Bilibili keepalive task failed; will retry")
+        await asyncio.sleep(min(60, settings.bilibili_retry_interval, settings.bilibili_check_interval))
+
+
+@app.on_event("startup")
+async def start_bilibili_keepalive() -> None:
+    global bilibili_keepalive_task
+    bilibili_keepalive_task = asyncio.create_task(bilibili_keepalive_loop())
+
+
+@app.on_event("shutdown")
+async def stop_bilibili_keepalive() -> None:
+    if bilibili_keepalive_task is not None:
+        bilibili_keepalive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await bilibili_keepalive_task
+
+
 @app.on_event("startup")
 async def start_source_video_cleanup() -> None:
     global cleanup_task
@@ -125,6 +169,11 @@ async def stop_source_video_cleanup() -> None:
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/bilibili/session", include_in_schema=False)
+def get_bilibili_session_status(admin: dict = Depends(require_admin)) -> dict:
+    return session_status()
 
 
 @app.get("/api/config")

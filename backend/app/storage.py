@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from fastapi import UploadFile
 
 from . import exercise_store
+from .bili_auth import download_cookie_args
 from .bili_subtitle import format_timestamp, get_video_info
 from .config import settings
 from .ffmpeg_tools import VideoProcessingError, probe_video, run_checked
@@ -198,26 +199,12 @@ def extract_bilibili_page(value: str) -> int | None:
     return parse_bilibili_input(value).page
 
 
-def _bilibili_auth_args() -> list[str]:
-    try:
-        cookies_file = settings.prepare_bilibili_cookies_file()
-    except FileNotFoundError as exc:
-        raise VideoProcessingError(str(exc)) from exc
-
-    args: list[str] = []
-    if cookies_file:
-        args.extend(["--cookies", str(cookies_file)])
-    if settings.bilibili_cookie_header:
-        args.extend(["--add-headers", f"Cookie:{settings.bilibili_cookie_header}"])
-    return args
-
-
 def _raise_bilibili_download_error(exc: VideoProcessingError) -> None:
     message = str(exc)
     if "HTTP Error 412" in message:
         raise VideoProcessingError(
-            "Bilibili returned HTTP 412. Configure a valid Bilibili cookie with "
-            "BILIBILI_COOKIES_FILE or BILIBILI_COOKIE_HEADER, then retry."
+            "Bilibili 暂时拒绝下载（HTTP 412），请稍后重试，"
+            "或检查网络与账号登录态。"
         ) from exc
     raise exc
 
@@ -361,18 +348,13 @@ def list_bilibili_pages(value: str, page: int | None = None) -> BilibiliPagesRes
     pages = _fetch_bilibili_pagelist(bv)
     if not pages:
         url = f"https://www.bilibili.com/video/{bv}"
-        command = [
-            "yt-dlp",
-            "--dump-single-json",
-            "--skip-download",
-            "--flat-playlist",
-            "--no-warnings",
-            *(_bilibili_auth_args()),
-            url,
-        ]
-
         try:
-            completed = run_checked(command, timeout=120)
+            with download_cookie_args() as auth_args:
+                command = [
+                    "yt-dlp", "--dump-single-json", "--skip-download",
+                    "--flat-playlist", "--no-warnings", *auth_args, url,
+                ]
+                completed = run_checked(command, timeout=120)
         except VideoProcessingError as exc:
             _raise_bilibili_download_error(exc)
         try:
@@ -457,12 +439,6 @@ def download_bilibili(value: str, page: int | None = None) -> VideoInfo:
 
         output_template = str(target_dir / "source.%(ext)s")
         url = _bilibili_page_url(bv, selected_page, page_info.cid if page_info else None)
-        try:
-            auth_args = _bilibili_auth_args()
-        except VideoProcessingError as exc:
-            shutil.rmtree(target_dir, ignore_errors=True)
-            raise exc
-
         command = [
             "yt-dlp",
             "--no-playlist",
@@ -472,12 +448,11 @@ def download_bilibili(value: str, page: int | None = None) -> VideoInfo:
             "mp4",
             "-o",
             output_template,
-            *auth_args,
         ]
-        command.append(url)
 
         try:
-            run_checked(command, timeout=600)
+            with download_cookie_args() as auth_args:
+                run_checked([*command, *auth_args, url], timeout=600)
         except VideoProcessingError as exc:
             shutil.rmtree(target_dir, ignore_errors=True)
             _raise_bilibili_download_error(exc)

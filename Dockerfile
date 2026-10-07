@@ -36,7 +36,7 @@ RUN pip install --no-cache-dir torch==2.9.1 torchaudio==2.9.1 --index-url https:
 COPY backend /app/backend
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
-RUN mkdir -p /data/uploads /data/downloads /data/outputs /data/cookies /data/fonts /data/exercises /data/models
+RUN mkdir -p /data/uploads /data/downloads /data/outputs /data/cookies /data/fonts /data/exercises /data/models /data/admin
 
 EXPOSE 8000
 
